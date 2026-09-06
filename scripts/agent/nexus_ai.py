@@ -33,7 +33,6 @@ def load_json(path):
     with path.open("r") as file:
         return json.load(file)
 
-
 def build_prompt(ai_context):
     """
     Build the NEXUS-specific prompt sent to the local model.
@@ -45,26 +44,50 @@ You are NEXUS AI, a local network security analysis component.
 Your job is to interpret evidence collected and scored by the
 NEXUS deterministic monitoring system.
 
+IMPORTANT:
+NEXUS has already performed the detection, correlation, scoring,
+and historical analysis. You must interpret that evidence, not
+replace it.
+
 Rules:
 
-1. Use only the supplied evidence.
-2. Do not invent facts.
-3. Do not claim an attack occurred unless the evidence supports it.
-4. Do not invent IP addresses, devices, users, or actions.
-5. Do not execute commands.
-6. Do not directly modify the network.
-7. Recommended actions must be investigation or observation steps.
-8. Distinguish facts from possibilities.
-9. Be concise and technically precise.
+1. Use only the supplied NEXUS evidence.
+2. Never invent facts.
+3. Never claim an attack, compromise, spoofing, intrusion,
+   unauthorized access, or malicious activity as a fact unless
+   NEXUS explicitly provides evidence supporting that conclusion.
+4. A MAC address change alone does NOT prove spoofing or an attack.
+5. A network anomaly does NOT automatically mean compromise.
+6. Distinguish observed facts from possible explanations.
+7. When evidence is insufficient, say that the cause is
+   undetermined.
+8. Use cautious language such as "may indicate", "could be
+   consistent with", or "cannot be determined from current evidence"
+   when appropriate.
+9. Do not invent IP addresses, devices, users, ports, vendors,
+   or network actions.
+10. Do not execute commands.
+11. Do not directly modify the network.
+12. Recommended actions must be safe investigation, validation,
+    or monitoring steps.
+13. Never recommend destructive or disruptive actions.
+14. Keep the response concise and technically precise.
 
 Return ONLY valid JSON with exactly these fields:
 
 {{
-  "interpretation": "What the evidence most likely means.",
+  "interpretation": "A concise interpretation supported by the evidence.",
   "confidence": "LOW, MEDIUM, or HIGH",
-  "recommended_action": "A safe investigation or monitoring recommendation.",
-  "reasoning_summary": "The evidence supporting the interpretation."
+  "recommended_action": "A safe investigation, validation, or monitoring step.",
+  "reasoning_summary": "The specific evidence supporting the interpretation.",
+  "evidence_status": "OBSERVED, POSSIBLE, or UNDETERMINED"
 }}
+
+Interpretation rules:
+
+- OBSERVED = directly supported by the supplied NEXUS evidence.
+- POSSIBLE = a plausible explanation, but not proven.
+- UNDETERMINED = the supplied evidence is insufficient to determine the cause.
 
 NEXUS EVIDENCE:
 
@@ -147,6 +170,7 @@ def validate_result(result):
         "confidence",
         "recommended_action",
         "reasoning_summary",
+        "evidence_status",
     }
 
     if not isinstance(
@@ -185,8 +209,41 @@ def validate_result(result):
             )
         )
 
-    return result
+    valid_evidence_status = {
+        "OBSERVED",
+        "POSSIBLE",
+        "UNDETERMINED",
+    }
 
+    if (
+        result["evidence_status"]
+        not in valid_evidence_status
+    ):
+
+        raise RuntimeError(
+            "AI returned invalid evidence_status: "
+            + str(
+                result["evidence_status"]
+            )
+        )
+
+    for field in (
+        "interpretation",
+        "recommended_action",
+        "reasoning_summary",
+    ):
+
+        if not isinstance(
+            result[field],
+            str,
+        ) or not result[field].strip():
+
+            raise RuntimeError(
+                "AI field must contain non-empty text: "
+                + field
+            )
+
+    return result
 
 def publish_result(result):
     """
@@ -264,6 +321,10 @@ def main():
     print(
         "Confidence:",
         result["confidence"],
+    )
+    print(
+        "Evidence status:",
+        result["evidence_status"],
     )
     print(
         "Recommended action:",
