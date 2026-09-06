@@ -7,6 +7,15 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 STATE = Path.home() / "nexus" / "hardware" / "state.json"
+
+AI_RESULT = (
+    Path.home()
+    / "nexus"
+    / "monitoring"
+    / "intelligence"
+    / "ai_result.json"
+)
+
 HOST = "127.0.0.1"
 PORT = 8787
 
@@ -43,6 +52,27 @@ def load_state():
 
     return default
 
+def load_ai_result():
+    default = {
+        "model": None,
+        "generated_at": None,
+        "source_intelligence_at": None,
+        "source_last_event_at": None,
+        "status": "UNAVAILABLE",
+        "result": {},
+    }
+
+    try:
+        with AI_RESULT.open() as file:
+            data = json.load(file)
+
+        if isinstance(data, dict):
+            default.update(data)
+
+    except (OSError, json.JSONDecodeError):
+        pass
+
+    return default
 
 def esc(value):
     return html.escape(str(value))
@@ -1628,6 +1658,7 @@ h1 {{
             return
 
         state = load_state()
+        ai_data = load_ai_result()
 
         status = esc(
             state.get(
@@ -1635,6 +1666,82 @@ h1 {{
                 "UNKNOWN",
             )
         ).upper()
+
+        ai_status = esc(
+            ai_data.get(
+                "status",
+                "UNAVAILABLE",
+            )
+        ).upper()
+
+        ai_model = esc(
+            ai_data.get(
+                "model",
+                "UNKNOWN",
+            )
+        )
+
+        ai_generated_at = esc(
+            format_timestamp(
+                ai_data.get(
+                    "generated_at"
+                )
+            )
+        )
+
+        ai_source_at = esc(
+            format_timestamp(
+                ai_data.get(
+                    "source_intelligence_at"
+                )
+            )
+        )
+
+        ai_result = ai_data.get(
+            "result",
+            {},
+        )
+
+        if not isinstance(
+            ai_result,
+            dict,
+        ):
+            ai_result = {}
+
+        ai_interpretation = esc(
+            ai_result.get(
+                "interpretation",
+                "No AI interpretation available.",
+            )
+        )
+
+        ai_confidence = esc(
+            ai_result.get(
+                "confidence",
+                "UNKNOWN",
+            )
+        ).upper()
+
+        ai_evidence_status = esc(
+            ai_result.get(
+                "evidence_status",
+                "UNKNOWN",
+            )
+        ).upper()
+
+        ai_recommendation = esc(
+            ai_result.get(
+                "recommended_action",
+                "No recommendation available.",
+            )
+        )
+
+        ai_reasoning = esc(
+            ai_result.get(
+                "reasoning_summary",
+                "No reasoning summary available.",
+            )
+        )
 
         risk = esc(
             state.get(
@@ -1883,7 +1990,58 @@ main {{
     font-size: 13px;
     line-height: 1.55;
 }}
+.ai-card {{
+    margin-top: 14px;
+}}
 
+.ai-header {{
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+}}
+
+.ai-status {{
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: .08em;
+}}
+
+.ai-text {{
+    margin-top: 10px;
+    color: #d1d7de;
+    font-size: 14px;
+    line-height: 1.55;
+}}
+
+.ai-meta {{
+    margin-top: 10px;
+    color: #7f8a96;
+    font-size: 11px;
+    line-height: 1.5;
+}}
+
+.ai-recommendation {{
+    margin-top: 14px;
+    padding: 12px;
+    background: #0d1218;
+    border: 1px solid #26303a;
+    border-radius: 10px;
+}}
+
+.ai-label {{
+    color: #7f8a96;
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: .1em;
+}}
+
+.ai-value {{
+    margin-top: 4px;
+    color: #d1d7de;
+    font-size: 13px;
+    line-height: 1.5;
+}}
 .network-grid {{
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2277,6 +2435,42 @@ main {{
         </div>
 
     </div>
+</section>
+
+<section class="card section ai-card">
+
+    <div class="ai-header">
+        <div class="label">NEXUS AI</div>
+        <div class="ai-status {severity_class(ai_confidence)}">
+            {ai_status}
+        </div>
+    </div>
+
+    <div class="ai-meta">
+        MODEL {ai_model}
+        ·
+        CONFIDENCE {ai_confidence}
+        ·
+        EVIDENCE {ai_evidence_status}
+    </div>
+
+    <div class="ai-text">
+        {ai_interpretation}
+    </div>
+
+    <div class="ai-recommendation">
+        <div class="ai-label">RECOMMENDED ACTION</div>
+        <div class="ai-value">
+            {ai_recommendation}
+        </div>
+    </div>
+
+    <div class="ai-meta">
+        AI GENERATED {ai_generated_at}
+        ·
+        SOURCE INTELLIGENCE {ai_source_at}
+    </div>
+
 </section>
 
 <section class="card section">
