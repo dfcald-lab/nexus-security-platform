@@ -992,6 +992,130 @@ def build_situations(context):
 
     return situations
 
+def build_ai_context(
+    context,
+    situations,
+):
+    """
+    Build a compact, structured context object
+    for future AI interpretation.
+    """
+
+    ai_situations = []
+
+    for situation in situations:
+
+        related_devices = []
+
+        for device in situation.get(
+            "related_devices",
+            [],
+        ):
+
+            related_devices.append(
+                {
+                    "device_id": device.get(
+                        "device_id"
+                    ),
+                    "device_type": device.get(
+                        "device_type"
+                    ),
+                    "vendor": device.get(
+                        "vendor"
+                    ),
+                    "ip": device.get(
+                        "ip"
+                    ),
+                    "port": device.get(
+                        "port"
+                    ),
+                    "vlan": device.get(
+                        "vlan"
+                    ),
+                }
+            )
+
+        ai_situations.append(
+            {
+                "subject": situation.get(
+                    "subject"
+                ),
+                "subject_type": situation.get(
+                    "subject_type"
+                ),
+                "assessment": situation.get(
+                    "assessment"
+                ),
+                "risk": situation.get(
+                    "risk"
+                ),
+                "confidence": situation.get(
+                    "confidence"
+                ),
+                "event_count": situation.get(
+                    "event_count",
+                    0,
+                ),
+                "highest_score": situation.get(
+                    "highest_score",
+                    0,
+                ),
+                "metrics": situation.get(
+                    "metrics",
+                    {},
+                ),
+                "historical_pattern": situation.get(
+                    "historical_pattern",
+                    {},
+                ),
+                "related_devices": (
+                    related_devices
+                ),
+            }
+        )
+
+    return {
+        "timestamp": context.get(
+            "intelligence_generated_at"
+        ),
+        "network": {
+            "switch": context.get(
+                "network",
+                {}
+            ).get(
+                "switch",
+                {}
+            ),
+            "gateway": context.get(
+                "network",
+                {}
+            ).get(
+                "gateway",
+                {}
+            ),
+            "ports": context.get(
+                "network",
+                {}
+            ).get(
+                "ports",
+                {}
+            ),
+        },
+        "active_events": len(
+            context.get(
+                "active_events",
+                [],
+            )
+        ),
+        "network_devices": len(
+            context.get(
+                "network_devices",
+                [],
+            )
+        ),
+        "situations": ai_situations,
+    }
+
 def publish_intelligence(context, situations):
     """
     Publish the current structured NEXUS intelligence state.
@@ -1000,6 +1124,11 @@ def publish_intelligence(context, situations):
     INTELLIGENCE_DIR.mkdir(
         parents=True,
         exist_ok=True,
+    )
+
+    ai_context = build_ai_context(
+        context,
+        situations,
     )
 
     output = {
@@ -1031,6 +1160,7 @@ def publish_intelligence(context, situations):
             situations
         ),
         "situations": situations,
+        "ai_context": ai_context,
     }
 
     with INTELLIGENCE_CURRENT.open(
