@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.pyc
+
+# Local secrets
+.env
+*.env
+nexus.env
+
+# NEXUS runtime state
+monitoring/events/*.json
+monitoring/events/*.jsonl
+monitoring/devices/*.json
+monitoring/snapshots/*.json
+monitoring/topology/*.json
+monitoring/endpoints/*.json
+monitoring/alerts/*.json
+monitoring/alerts/*.jsonl
+
+# Backup / scratch copies
+*.bak
+*.before_*
+*.after_*
+*.v1
+*.v2
+*.v3
+*.v3-*
+*.v3-assessment
+*.v3-clean
+
+# OS/editor files
+.DS_Store
+.vscode/
+.idea/
+
+# Hardware runtime state / backups
+hardware/state.json
+hardware/*-bak
+*.console-bak
