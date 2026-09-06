@@ -379,13 +379,13 @@ def correlate_events(events):
 
 def assess_situation(
     subject_type,
-    subject_id,
+    subject,
     events,
     device_context,
 ):
     """
-    Perform deterministic, context-aware assessment
-    of a correlated NEXUS situation.
+    Evaluate a group of correlated events as one
+    network situation.
     """
 
     messages = [
@@ -417,6 +417,14 @@ def assess_situation(
             or "Topology port" in message
         )
         for message in messages
+    )
+
+    highest_score = max(
+        event.get(
+            "score",
+            0,
+        )
+        for event in events
     )
 
     assessment = "NORMAL ACTIVITY"
@@ -473,8 +481,9 @@ def assess_situation(
             )
 
             investigation = (
-                "Compare previous and current MAC "
-                "addresses and verify the associated device."
+                "Review the previous and current "
+                "MAC identities and verify the "
+                "device's switch port."
             )
 
         elif (
@@ -497,6 +506,25 @@ def assess_situation(
             investigation = (
                 "Monitor for repeated changes or "
                 "simultaneous port and IP changes."
+            )
+
+        elif highest_score >= 25:
+
+            assessment = (
+                "SIGNIFICANT DEVICE ACTIVITY"
+            )
+
+            risk = "REVIEW"
+            confidence = "HIGH"
+
+            explanation = (
+                "The device has a high-scored event "
+                "associated with it."
+            )
+
+            investigation = (
+                "Review the device event history and "
+                "its current network location."
             )
 
     elif subject_type == "PORT":
@@ -523,15 +551,26 @@ def assess_situation(
                 "device was intentionally disconnected."
             )
 
-    elif subject_type == "NETWORK":
+        elif highest_score >= 15:
 
-        highest_score = max(
-            event.get(
-                "score",
-                0,
+            assessment = (
+                "PORT ANOMALY"
             )
-            for event in events
-        )
+
+            risk = "REVIEW"
+            confidence = "MEDIUM"
+
+            explanation = (
+                "The port is associated with a "
+                "security-scored topology event."
+            )
+
+            investigation = (
+                "Identify the connected device and "
+                "review recent MAC and topology changes."
+            )
+
+    elif subject_type == "NETWORK":
 
         if highest_score == 0:
 
@@ -544,7 +583,8 @@ def assess_situation(
 
             explanation = (
                 "Network health metrics changed "
-                "without an associated security-scored event."
+                "without an associated security-scored "
+                "event."
             )
 
             investigation = (
@@ -583,6 +623,57 @@ def assess_situation(
             "port_changes": port_changes,
         },
     }
+
+def find_related_devices(
+    subject,
+    subject_type,
+    network_devices,
+    messages,
+):
+    """
+    Find network devices related to a situation.
+    """
+
+    related = []
+
+    for device in network_devices:
+
+        device_id = device.get(
+            "device_id",
+            ""
+        )
+
+        port = device.get(
+            "port",
+            ""
+        )
+
+        matched = False
+
+        if subject_type == "DEVICE":
+
+            matched = (
+                device_id == subject
+            )
+
+        elif subject_type == "PORT":
+
+            matched = (
+                port == subject
+            )
+
+        elif subject_type == "NETWORK":
+
+            matched = any(
+                device_id in message
+                or port in message
+                for message in messages
+            )
+
+        if matched:
+            related.append(device)
+
+    return related
 
 def build_situations(context):
     """
@@ -642,6 +733,16 @@ def build_situations(context):
 
             subject_type = "DEVICE"
 
+        related_devices = find_related_devices(
+            subject,
+            subject_type,
+            context.get(
+                "network_devices",
+                [],
+            ),
+            messages,
+        )
+
         assessment_result = assess_situation(
             subject_type,
             subject,
@@ -681,6 +782,7 @@ def build_situations(context):
                 "metrics": assessment_result[
                     "metrics"
                 ],
+                "related_devices": related_devices,
                 "events": messages,
             }
         )
