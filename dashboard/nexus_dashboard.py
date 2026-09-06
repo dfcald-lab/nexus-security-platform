@@ -439,9 +439,9 @@ body {{
 }}
 
 main {{
-    width: min(100% - 20px, 760px);
+    width: min(100% - 24px, 1500px);
     margin: auto;
-    padding: 20px 0 40px;
+    padding: 24px 0 48px;
 }}
 
 a {{
@@ -527,6 +527,41 @@ a {{
 .critical {{
     color: #ff7b72;
 }}
+
+@media (min-width: 700px) {{
+    main {{
+        width: min(100% - 48px, 1100px);
+        padding-top: 32px;
+    }}
+
+    .card {{
+        padding: 20px;
+    }}
+
+    .history-row {{
+        display: grid;
+        grid-template-columns: 90px minmax(150px, 220px) minmax(0, 1fr) auto;
+        align-items: center;
+        column-gap: 16px;
+    }}
+
+    .history-message,
+    .history-state,
+    .device-link {{
+        margin-top: 0;
+    }}
+}}
+
+@media (min-width: 1100px) {{
+    main {{
+        width: min(100% - 64px, 1500px);
+    }}
+
+    .card {{
+        padding: 22px;
+    }}
+}}
+
 </style>
 </head>
 
@@ -730,9 +765,9 @@ body {{
 }}
 
 main {{
-    width: min(100% - 20px, 700px);
+    width: min(100% - 24px, 1500px);
     margin: auto;
-    padding: 20px 0 40px;
+    padding: 24px 0 48px;
 }}
 
 a {{
@@ -852,6 +887,36 @@ a {{
     color: #7f8a96;
     font-size: 12px;
 }}
+
+@media (min-width: 700px) {{
+    main {{
+        width: min(100% - 48px, 1000px);
+        padding-top: 32px;
+    }}
+
+    .card {{
+        padding: 24px;
+    }}
+
+    .timeline {{
+        max-width: 800px;
+    }}
+
+    .message {{
+        max-width: 900px;
+    }}
+}}
+
+@media (min-width: 1100px) {{
+    main {{
+        width: min(100% - 64px, 1100px);
+    }}
+
+    .card {{
+        padding: 28px;
+    }}
+}}
+
 </style>
 </head>
 
@@ -1699,9 +1764,9 @@ body {{
 }}
 
 main {{
-    width: min(100% - 20px, 820px);
+    width: min(100% - 24px, 1500px);
     margin: 0 auto;
-    padding: 18px 0 40px;
+    padding: 24px 0 48px;
 }}
 
 .header {{
@@ -1735,7 +1800,7 @@ main {{
 .grid {{
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 10px;
+    gap: 12px;
 }}
 
 .card {{
@@ -1850,6 +1915,41 @@ main {{
     color: #5f6b77;
     font-size: 11px;
     text-align: center;
+}}
+
+@media (min-width: 700px) {{
+    main {{
+        width: min(100% - 48px, 1100px);
+        padding-top: 32px;
+    }}
+
+    .grid {{
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 14px;
+    }}
+
+    .card {{
+        padding: 18px;
+    }}
+
+    .value {{
+        font-size: 28px;
+    }}
+}}
+
+@media (min-width: 1100px) {{
+    main {{
+        width: min(100% - 64px, 1500px);
+    }}
+
+    .grid {{
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+        gap: 14px;
+    }}
+
+    .section {{
+        margin-top: 14px;
+    }}
 }}
 
 @media (max-width: 420px) {{
