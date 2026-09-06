@@ -4,6 +4,7 @@ import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from scripts.agent.event_classifier import classify_event
 
 
 # ============================================================
@@ -972,11 +973,18 @@ def save_events(
 
         for severity, score, message in events:
 
+            classification = classify_event(
+                message,
+                severity,
+                score,
+            )
+
             event_record = {
                 "timestamp": timestamp.isoformat(),
                 "risk_level": risk_level,
                 "event_score": event_score,
                 "event_type": "network_change",
+                "classification": classification,
                 "severity": severity,
                 "score": score,
                 "message": message,
