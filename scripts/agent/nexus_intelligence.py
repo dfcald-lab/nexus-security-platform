@@ -38,6 +38,11 @@ INTELLIGENCE_CURRENT = (
     / "current.json"
 )
 
+INTELLIGENCE_HISTORY = (
+    INTELLIGENCE_DIR
+    / "history.jsonl"
+)
+
 def load_json(path):
     with open(path, "r") as f:
         return json.load(f)
@@ -520,13 +525,15 @@ def assess_situation(
 
     elif subject_type == "NETWORK":
 
-        if all(
+        highest_score = max(
             event.get(
                 "score",
                 0,
-            ) == 0
+            )
             for event in events
-        ):
+        )
+
+        if highest_score == 0:
 
             assessment = (
                 "NETWORK HEALTH CHANGE"
@@ -542,6 +549,25 @@ def assess_situation(
 
             investigation = (
                 "No immediate action required."
+            )
+
+        elif highest_score >= 15:
+
+            assessment = (
+                "NETWORK ANOMALY"
+            )
+
+            risk = "REVIEW"
+            confidence = "MEDIUM"
+
+            explanation = (
+                "The network correlation contains "
+                "a security-scored event requiring review."
+            )
+
+            investigation = (
+                "Review the contributing event and "
+                "identify the affected device or port."
             )
 
     return {
@@ -684,7 +710,13 @@ def publish_intelligence(context, situations):
             timezone.utc
         ).isoformat(),
         "source_last_event_at": context.get(
-            "last_timestamp",
+            "last_timestamp"
+        ),
+        "active_events": len(
+            context.get(
+                "active_events",
+                [],
+            )
         ),
         "recent_events": len(
             context.get(
@@ -711,6 +743,38 @@ def publish_intelligence(context, situations):
             output,
             file,
             indent=2,
+        )
+
+    history_record = {
+        "generated_at": output["generated_at"],
+        "source_last_event_at": output[
+            "source_last_event_at"
+        ],
+        "active_events": output[
+            "active_events"
+        ],
+        "recent_events": output[
+            "recent_events"
+        ],
+        "network_devices": output[
+            "network_devices"
+        ],
+        "situation_count": output[
+            "situation_count"
+        ],
+        "situations": output[
+            "situations"
+        ],
+    }
+
+    with INTELLIGENCE_HISTORY.open(
+        "a"
+    ) as file:
+        file.write(
+            json.dumps(
+                history_record
+            )
+            + "\n"
         )
 
     return output
