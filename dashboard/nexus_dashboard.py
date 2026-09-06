@@ -557,8 +557,13 @@ a {{
         width: min(100% - 64px, 1500px);
     }}
 
-    .card {{
-        padding: 22px;
+    .grid {{
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 14px;
+    }}
+
+    .section {{
+        margin-top: 14px;
     }}
 }}
 
@@ -1652,6 +1657,20 @@ h1 {{
             )
         )
 
+        actionable_events = int(
+            state.get(
+                "actionable_events",
+                0,
+            )
+        )
+
+        classification = esc(
+            state.get(
+                "classification",
+                "NORMAL",
+            )
+        ).upper()
+
         devices = int(
             state.get(
                 "devices",
@@ -1738,6 +1757,12 @@ h1 {{
 
         css_class = severity_class(
             severity
+        )
+
+        actionable_class = (
+            "actionable"
+            if actionable_events > 0
+            else "normal"
         )
 
         page = f"""<!doctype html>
@@ -1844,6 +1869,10 @@ main {{
     color: #ff7b72;
 }}
 
+.actionable {{
+    color: #e3b341;
+}}
+
 .section {{
     margin-top: 10px;
 }}
@@ -1853,6 +1882,92 @@ main {{
     color: #aab4bf;
     font-size: 13px;
     line-height: 1.55;
+}}
+
+.network-grid {{
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+    margin-top: 12px;
+}}
+
+.network-block {{
+    min-width: 0;
+    padding: 13px;
+    background: #0d1218;
+    border: 1px solid #26303a;
+    border-radius: 10px;
+    text-align: center;
+}}
+
+.gateway-block,
+.topology-block {{
+    text-align: center;
+}}
+
+.network-block-wide {{
+    grid-column: 1 / -1;
+}}
+
+.network-label,
+.port-label {{
+    color: #7f8a96;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: .1em;
+}}
+
+.network-value {{
+    margin-top: 5px;
+    font-size: 18px;
+    font-weight: 750;
+    overflow-wrap: anywhere;
+}}
+
+.network-meta {{
+    margin-top: 4px;
+    color: #7f8a96;
+    font-size: 12px;
+    overflow-wrap: anywhere;
+}}
+
+.port-grid {{
+    display: grid;
+    grid-template-columns: repeat(2, minmax(110px, 1fr));
+    justify-content: center;
+    gap: 8px;
+    margin-top: 10px;
+    max-width: 320px;
+    margin-left: auto;
+    margin-right: auto;
+}}
+
+.port-stat {{
+    min-width: 0;
+    text-align: center;
+    padding: 10px 4px;
+    background: #11161d;
+    border: 1px solid #222b35;
+    border-radius: 8px;
+}}
+
+.port-stat:last-child {{
+    grid-column: 1 / -1;
+    width: 50%;
+    justify-self: center;
+}}
+
+
+.port-value {{
+    font-size: 20px;
+    font-weight: 750;
+}}
+
+.port-label {{
+    margin-top: 3px;
+    font-size: 9px;
+    line-height: 1.2;
+    overflow-wrap: anywhere;
 }}
 
 .device-row,
@@ -1935,6 +2050,33 @@ main {{
     .value {{
         font-size: 28px;
     }}
+
+    .network-grid {{
+        grid-template-columns: 2fr 1fr;
+    }}
+
+    .network-block-wide {{
+        grid-column: 1 / -1;
+    }}
+
+    .port-grid {{
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        max-width: none;
+        margin-left: 0;
+        margin-right: 0;
+        gap: 10px;
+    }}
+
+    .port-stat:last-child {{
+        grid-column: auto;
+        width: auto;
+        justify-self: stretch;
+    }}
+
+    .port-label {{
+        font-size: 10px;
+    }}
+
 }}
 
 @media (min-width: 1100px) {{
@@ -1950,6 +2092,23 @@ main {{
     .section {{
         margin-top: 14px;
     }}
+
+    .network-grid {{
+        gap: 16px;
+    }}
+
+    .network-block {{
+        padding: 16px;
+    }}
+
+    .network-value {{
+        font-size: 19px;
+    }}
+
+    .port-stat {{
+        padding: 12px 8px;
+    }}
+
 }}
 
 @media (max-width: 420px) {{
@@ -1960,7 +2119,29 @@ main {{
     .card {{
         padding: 13px;
     }}
+
+    .network-grid {{
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+    }}
+
+    .network-block {{
+        width: 100%;
+        justify-self: stretch;
+    }}
+
+    .gateway-block {{
+        width: 100%;
+        justify-self: stretch;
+    }}
+
+    .topology-block {{
+        grid-column: 1 / -1;
+        width: 50%;
+        justify-self: center;
+    }}
 }}
+
 </style>
 </head>
 
@@ -2004,23 +2185,97 @@ main {{
     </article>
 
     <article class="card">
+        <div class="label">Classification</div>
+        <div class="value">{classification}</div>
+    </article>
+
+    <article class="card">
+        <div class="label">Actionable Events</div>
+        <div class="value {actionable_class}">{actionable_events}</div>
+    </article>
+
+    <article class="card">
         <div class="label">Topology Edges</div>
         <div class="value">{network.get("topology_edges", 0)}</div>
     </article>
 
 </section>
 
-<section class="card section">
+<section class="card section network-card">
     <div class="label">Network</div>
-    <div class="console">
-        <strong>{esc(switch.get("model", "Unknown"))}</strong><br>
-        Management: {esc(switch.get("management_ip", "Unknown"))}<br>
-        Gateway: {esc(gateway.get("ip", "Unknown"))}<br>
-        Ports: {ports.get("total", 0)} ·
-        Direct: {ports.get("direct_devices", 0)} ·
-        Multi-MAC: {ports.get("multi_mac", 0)} ·
-        Unknown: {ports.get("connected_unknown", 0)} ·
-        Disconnected: {ports.get("disconnected", 0)}
+
+    <div class="network-grid">
+
+        <div class="network-block gateway-block">
+            <div class="network-label">Switch</div>
+            <div class="network-value">
+                {esc(switch.get("model", "Unknown"))}
+            </div>
+            <div class="network-meta">
+                {esc(switch.get("hostname", "Unknown"))}
+                ·
+                {esc(switch.get("management_ip", "Unknown"))}
+            </div>
+        </div>
+
+        <div class="network-block">
+            <div class="network-label">Gateway</div>
+            <div class="network-value">
+                {esc(gateway.get("ip", "Unknown"))}
+            </div>
+        </div>
+
+        <div class="network-block network-block-wide">
+            <div class="network-label">Ports</div>
+
+            <div class="port-grid">
+
+                <div class="port-stat">
+                    <div class="port-value">
+                        {ports.get("total", 0)}
+                    </div>
+                    <div class="port-label">TOTAL</div>
+                </div>
+
+                <div class="port-stat">
+                    <div class="port-value">
+                        {ports.get("direct_devices", 0)}
+                    </div>
+                    <div class="port-label">DIRECT</div>
+                </div>
+
+                <div class="port-stat">
+                    <div class="port-value">
+                        {ports.get("multi_mac", 0)}
+                    </div>
+                    <div class="port-label">MULTI-MAC</div>
+                </div>
+
+                <div class="port-stat">
+                    <div class="port-value">
+                        {ports.get("connected_unknown", 0)}
+                    </div>
+                    <div class="port-label">UNKNOWN</div>
+                </div>
+
+                <div class="port-stat">
+                    <div class="port-value">
+                        {ports.get("disconnected", 0)}
+                    </div>
+                    <div class="port-label">DISCONNECTED</div>
+                </div>
+
+            </div>
+        </div>
+
+        <div class="network-block topology-block">
+            <div class="network-label">Topology</div>
+            <div class="network-value">
+                {network.get("topology_edges", 0)}
+            </div>
+            <div class="network-meta">EDGES</div>
+        </div>
+
     </div>
 </section>
 
