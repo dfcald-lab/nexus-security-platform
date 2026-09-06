@@ -26,6 +26,16 @@ JETSON_STATE = (
     / "state.json"
 )
 
+INTELLIGENCE_DIR = (
+    NEXUS
+    / "monitoring"
+    / "intelligence"
+)
+
+INTELLIGENCE_CURRENT = (
+    INTELLIGENCE_DIR
+    / "current.json"
+)
 
 def load_json(path):
     with open(path, "r") as f:
@@ -254,6 +264,32 @@ def extract_subject(message):
             subject = message[
                 start + len(marker):
             ]
+
+            if "|" in subject:
+                subject = subject.split(
+                    "|",
+                    1,
+                )[0]
+
+            return subject.strip()
+
+    if "on port:" in message:
+
+        marker = "on port:"
+        start = message.find(marker)
+
+        if start != -1:
+
+            subject = message[
+                start + len(marker):
+            ].strip()
+
+            if subject.startswith(
+                "ports."
+            ):
+                subject = subject[
+                    len("ports.") :
+                ]
 
             if "|" in subject:
                 subject = subject.split(
@@ -580,12 +616,28 @@ def build_situations(context):
         situations.append(
             {
                 "subject": subject,
+                "subject_type": subject_type,
                 "event_count": len(events),
                 "highest_score": highest_score,
                 "severities": sorted(
                     severities
                 ),
                 "assessment": assessment,
+                "risk": assessment_result[
+                    "risk"
+                ],
+                "confidence": assessment_result[
+                    "confidence"
+                ],
+                "explanation": assessment_result[
+                    "explanation"
+                ],
+                "investigation": assessment_result[
+                    "investigation"
+                ],
+                "metrics": assessment_result[
+                    "metrics"
+                ],
                 "events": messages,
             }
         )
@@ -600,12 +652,66 @@ def build_situations(context):
 
     return situations
 
+def publish_intelligence(context, situations):
+    """
+    Publish the current structured NEXUS intelligence state.
+    """
+
+    INTELLIGENCE_DIR.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    output = {
+        "generated_at": context.get(
+            "last_timestamp"
+        ),
+        "active_events": len(
+            context.get(
+                "active_events",
+                [],
+            )
+        ),
+        "recent_events": len(
+            context.get(
+                "recent_events",
+                [],
+            )
+        ),
+        "network_devices": len(
+            context.get(
+                "network_devices",
+                [],
+            )
+        ),
+        "situation_count": len(
+            situations
+        ),
+        "situations": situations,
+    }
+
+    with INTELLIGENCE_CURRENT.open(
+        "w"
+    ) as file:
+        json.dump(
+            output,
+            file,
+            indent=2,
+        )
+
+    return output
+
 def main():
 
     context = build_intelligence_context()
 
     situations = build_situations(
         context
+    )
+
+    publish_intelligence(
+        context,
+        situations,
     )
 
     print()

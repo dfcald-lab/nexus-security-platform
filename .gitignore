@@ -37,3 +37,7 @@ monitoring/alerts/*.jsonl
 hardware/state.json
 hardware/*-bak
 *.console-bak
+
+# NEXUS intelligence runtime state
+monitoring/intelligence/*.json
+monitoring/intelligence/*.jsonl
