@@ -3,6 +3,7 @@
 import json
 import urllib.error
 import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -307,9 +308,13 @@ def validate_result(result):
 
     return result
 
-def publish_result(result):
+def publish_result(
+    result,
+    intelligence,
+):
     """
-    Save the validated NEXUS AI result.
+    Save the validated NEXUS AI result together
+    with the intelligence snapshot it analyzed.
     """
 
     AI_OUTPUT.parent.mkdir(
@@ -319,6 +324,20 @@ def publish_result(result):
 
     output = {
         "model": MODEL,
+        "generated_at": datetime.now(
+            timezone.utc
+        ).isoformat(),
+        "source_intelligence_at": (
+            intelligence.get(
+                "generated_at"
+            )
+        ),
+        "source_last_event_at": (
+            intelligence.get(
+                "source_last_event_at"
+            )
+        ),
+        "status": "AVAILABLE",
         "result": result,
     }
 
@@ -333,7 +352,6 @@ def publish_result(result):
         )
 
     return output
-
 
 def main():
 
@@ -364,7 +382,8 @@ def main():
     )
 
     output = publish_result(
-        result
+        result,
+        ai_data,
     )
 
     print()
