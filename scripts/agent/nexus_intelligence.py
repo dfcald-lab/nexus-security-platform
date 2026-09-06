@@ -134,6 +134,11 @@ def build_intelligence_context():
     )
 
     context = {
+        "intelligence_generated_at": (
+            datetime.now(
+                timezone.utc
+            ).isoformat()
+        ),
         "active_events": event_state.get(
             "active_events",
             [],
@@ -714,15 +719,22 @@ def analyze_historical_pattern(
     subject_type,
     history,
     current_situation,
+    current_timestamp,
 ):
     """
     Analyze persistence and recurrence of a situation
     across previous NEXUS intelligence snapshots.
     """
 
-    previous = []
+    snapshot_states = []
 
     for snapshot in history:
+
+        snapshot_timestamp = snapshot.get(
+            "generated_at"
+        )
+
+        matching_situation = None
 
         for situation in snapshot.get(
             "situations",
@@ -734,51 +746,107 @@ def analyze_historical_pattern(
                 and situation.get("subject_type")
                 == subject_type
             ):
-                previous.append(
-                    situation
-                )
-
-    observations = len(
-        previous
-    )
-
-    if not previous:
-        return {
-            "observations": 0,
-            "recurrences": 0,
-            "recurring": False,
-            "currently_persistent": (
-                current_situation != "NORMAL ACTIVITY"
-            ),
-        }
-
-    recurrences = 0
-    was_meaningful = False
-
-    for situation in previous:
+                matching_situation = situation
+                break
 
         is_meaningful = (
-            situation.get(
+            matching_situation is not None
+            and matching_situation.get(
                 "assessment",
                 "NORMAL ACTIVITY",
             )
             != "NORMAL ACTIVITY"
         )
 
-        if is_meaningful and not was_meaningful:
+        snapshot_states.append(
+            {
+                "timestamp": snapshot_timestamp,
+                "meaningful": is_meaningful,
+            }
+        )
+
+    observations = sum(
+        state["meaningful"]
+        for state in snapshot_states
+    )
+
+    recurrences = 0
+    was_meaningful = False
+
+    for state in snapshot_states:
+
+        is_meaningful = state[
+            "meaningful"
+        ]
+
+        if (
+            is_meaningful
+            and not was_meaningful
+        ):
             recurrences += 1
 
         was_meaningful = is_meaningful
 
-    currently_persistent = (
+    current_is_meaningful = (
         current_situation != "NORMAL ACTIVITY"
     )
+
+    first_observed_at = None
+    last_observed_at = None
+
+    for state in snapshot_states:
+
+        if state["meaningful"]:
+
+            if first_observed_at is None:
+                first_observed_at = (
+                    state["timestamp"]
+                )
+
+            last_observed_at = (
+                state["timestamp"]
+            )
+
+    persistence_observations = 0
+
+    if current_is_meaningful:
+
+        for state in reversed(
+            snapshot_states
+        ):
+
+            if not state["meaningful"]:
+                break
+
+            persistence_observations += 1
+
+        persistence_observations += 1
+
+        if first_observed_at is None:
+            first_observed_at = (
+                current_timestamp
+            )
+
+        last_observed_at = (
+            current_timestamp
+        )
 
     return {
         "observations": observations,
         "recurrences": recurrences,
         "recurring": recurrences >= 2,
-        "currently_persistent": currently_persistent,
+        "currently_persistent": (
+            current_is_meaningful
+        ),
+        "first_observed_at": (
+            first_observed_at
+        ),
+        "last_observed_at": (
+            last_observed_at
+        ),
+        "persistence_observations": (
+            persistence_observations
+        ),
     }
 
 def build_situations(context):
@@ -873,6 +941,9 @@ def build_situations(context):
                     [],
                 ),
                 assessment,
+                context.get(
+                    "intelligence_generated_at"
+                ),
             )
         )
 
@@ -880,6 +951,9 @@ def build_situations(context):
             {
                 "subject": subject,
                 "subject_type": subject_type,
+                "observed_at": context.get(
+                    "intelligence_generated_at"
+                ),
                 "event_count": len(events),
                 "highest_score": highest_score,
                 "severities": sorted(
