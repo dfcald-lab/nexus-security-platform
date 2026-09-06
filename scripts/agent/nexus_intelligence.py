@@ -1107,6 +1107,7 @@ def build_ai_context(
                 [],
             )
         ),
+
         "network_devices": len(
             context.get(
                 "network_devices",
@@ -1114,6 +1115,33 @@ def build_ai_context(
             )
         ),
         "situations": ai_situations,
+        "response_contract": (
+            build_ai_response_contract()
+        ),
+    }
+
+def build_ai_response_contract():
+    """
+    Define the structured response expected from future AI analysis.
+    """
+
+    return {
+        "interpretation": (
+            "A concise explanation of what the "
+            "current network situation likely means."
+        ),
+        "confidence": (
+            "AI confidence in the interpretation."
+        ),
+        "recommended_action": (
+            "A recommended operator investigation "
+            "or response. This must not directly "
+            "modify the network."
+        ),
+        "reasoning_summary": (
+            "A concise summary of the evidence "
+            "supporting the interpretation."
+        ),
     }
 
 def publish_intelligence(context, situations):
