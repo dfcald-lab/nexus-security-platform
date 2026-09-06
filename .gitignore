@@ -41,3 +41,6 @@ hardware/*-bak
 # NEXUS intelligence runtime state
 monitoring/intelligence/*.json
 monitoring/intelligence/*.jsonl
+
+
+scripts/agent/switch_info_v1.py
