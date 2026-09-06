@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 
 import json
+import os
 import sys
 import time
+import subprocess
 from pathlib import Path
 
 import psutil
@@ -83,11 +85,14 @@ FONT_MED = ImageFont.truetype(
 
 
 def load_state():
+
     state = {
         "status": "ONLINE",
         "risk": "LOW",
         "severity": "INFO",
+        "classification": "NORMAL",
         "active_events": 0,
+        "actionable_events": 0,
         "devices": 0,
         "top_event": "NO ALERT",
     }
@@ -307,6 +312,60 @@ def highest_actionable_severity(state):
 
     return severity
 
+def play_critical_alert():
+    try:
+        env = os.environ.copy()
+        env["XDG_RUNTIME_DIR"] = "/run/user/1000"
+        env["PULSE_SERVER"] = "unix:/run/user/1000/pulse/native"
+
+        sound = [
+            "paplay",
+            "--device=alsa_output.platform-3510000.hda.hdmi-stereo",
+            "/usr/share/sounds/freedesktop/stereo/message-new-instant.oga",
+        ]
+
+        for count in range(2):
+            result = subprocess.run(
+                sound,
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=5,
+                env=env,
+            )
+
+            if result.returncode != 0:
+                print(
+                    f"AUDIO: PLAYBACK FAILED ({result.returncode})",
+                    flush=True,
+                )
+
+                if result.stderr:
+                    print(
+                        f"AUDIO ERROR: {result.stderr.strip()}",
+                        flush=True,
+                    )
+
+                return
+
+            if count == 0:
+                time.sleep(0.7)
+
+        print(
+            "AUDIO: CRITICAL ALERT PLAYED x2",
+            flush=True,
+        )
+
+    except (
+        FileNotFoundError,
+        subprocess.TimeoutExpired,
+    ) as error:
+        print(
+            f"AUDIO: CRITICAL ALERT FAILED: {error}",
+            flush=True,
+        )
+
 
 def main():
     print(
@@ -333,9 +392,16 @@ def main():
                 )
             )
 
+            actionable_events = int(
+                state.get(
+                    "actionable_events",
+                    0,
+                )
+            )
+
             state_key = (
                 severity,
-                active_events,
+                actionable_events,
                 state.get(
                     "top_event",
                     "",
@@ -344,18 +410,28 @@ def main():
 
             if state_key != last_state_key:
 
-                if active_events <= 0:
+                if actionable_events <= 0:
                     hardware_state = "NORMAL"
                 else:
                     hardware_state = severity
+                if (
+                    actionable_events > 0
+                    and severity == "CRITICAL"
+                ):
+                    print(
+                        "AUDIO: CRITICAL ALERT",
+                        flush=True,
+                    )
+
+                    play_critical_alert()
 
                 led_state = set_led(
                     severity,
-                    active_events,
+                    actionable_events,
                 )
 
                 if (
-                    active_events > 0
+                    actionable_events > 0
                     and severity in {
                         "MEDIUM",
                         "HIGH",
@@ -402,7 +478,7 @@ def main():
             # Keep the alert visible, while still showing useful
             # network and system telemetry between alert screens.
             actionable = (
-                active_events > 0
+                actionable_events > 0
                 and severity in {
                     "MEDIUM",
                     "HIGH",

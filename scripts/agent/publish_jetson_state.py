@@ -6,7 +6,7 @@ import subprocess
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-
+from scripts.agent.event_classifier import classify_event
 
 NEXUS = Path.home() / "nexus"
 
@@ -90,6 +90,7 @@ def parse_event(key):
             "severity": "INFO",
             "score": 0,
             "message": key,
+            "classification": "NORMAL",
         }
 
     severity, score, message = parts
@@ -99,12 +100,18 @@ def parse_event(key):
     except ValueError:
         score = 0
 
+    classification = classify_event(
+        message,
+        severity,
+        score,
+    )
+
     return {
         "severity": severity,
         "score": score,
         "message": message,
+        "classification": classification,
     }
-
 
 def incident_id(event):
     raw = (
@@ -465,20 +472,32 @@ def build_state():
         reverse=True,
     )
 
-    if parsed:
+    actionable = [
+        event
+        for event in parsed
+        if event.get("classification") != "NORMAL"
+    ]
 
-        top = parsed[0]
+    if actionable:
+
+        top = actionable[0]
 
         severity = top["severity"]
+        event_classification = top["classification"]
         top_event = top["message"]
 
     else:
 
         severity = "INFO"
+        event_classification = "NORMAL"
         top_event = "NO ALERT"
 
     active_count = len(
         active_events
+    )
+
+    actionable_count = len(
+        actionable
     )
 
     if severity == "CRITICAL":
@@ -830,7 +849,9 @@ def build_state():
         "status": "ONLINE",
         "risk": risk,
         "severity": severity,
+        "classification": event_classification,
         "active_events": active_count,
+	"actionable_events": actionable_count,
         "devices": len(devices),
         "top_event": top_event,
         "network": {
