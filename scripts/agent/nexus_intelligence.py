@@ -713,10 +713,11 @@ def analyze_historical_pattern(
     subject,
     subject_type,
     history,
+    current_situation,
 ):
     """
-    Analyze how often a situation has appeared
-    in previous NEXUS intelligence snapshots.
+    Analyze persistence and recurrence of a situation
+    across previous NEXUS intelligence snapshots.
     """
 
     previous = []
@@ -737,27 +738,47 @@ def analyze_historical_pattern(
                     situation
                 )
 
-    occurrence_count = len(
+    observations = len(
         previous
     )
 
-    same_assessment_count = sum(
-        situation.get(
-            "assessment"
-        ) == previous[-1].get(
-            "assessment"
-        )
-        for situation in previous
-    ) if previous else 0
+    if not previous:
+        return {
+            "observations": 0,
+            "recurrences": 0,
+            "recurring": False,
+            "currently_persistent": (
+                current_situation != "NORMAL ACTIVITY"
+            ),
+        }
 
-    recurring = occurrence_count >= 3
+    recurrences = 0
+    was_meaningful = False
+
+    for situation in previous:
+
+        is_meaningful = (
+            situation.get(
+                "assessment",
+                "NORMAL ACTIVITY",
+            )
+            != "NORMAL ACTIVITY"
+        )
+
+        if is_meaningful and not was_meaningful:
+            recurrences += 1
+
+        was_meaningful = is_meaningful
+
+    currently_persistent = (
+        current_situation != "NORMAL ACTIVITY"
+    )
 
     return {
-        "previous_occurrences": occurrence_count,
-        "same_assessment_count": (
-            same_assessment_count
-        ),
-        "recurring": recurring,
+        "observations": observations,
+        "recurrences": recurrences,
+        "recurring": recurrences >= 2,
+        "currently_persistent": currently_persistent,
     }
 
 def build_situations(context):
@@ -828,16 +849,6 @@ def build_situations(context):
             messages,
         )
 
-        historical_pattern = (
-            analyze_historical_pattern(
-                subject,
-                subject_type,
-                context.get(
-                    "intelligence_history",
-                    [],
-                ),
-            )
-        )
 
         assessment_result = assess_situation(
             subject_type,
@@ -852,6 +863,18 @@ def build_situations(context):
         assessment = assessment_result[
             "assessment"
         ]
+
+        historical_pattern = (
+            analyze_historical_pattern(
+                subject,
+                subject_type,
+                context.get(
+                    "intelligence_history",
+                    [],
+                ),
+                assessment,
+            )
+        )
 
         situations.append(
             {
