@@ -44,3 +44,6 @@ monitoring/intelligence/*.jsonl
 
 
 scripts/agent/switch_info_v1.py
+
+# NEXUS AI runtime logs
+monitoring/intelligence/*.log

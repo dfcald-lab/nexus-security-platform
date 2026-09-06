@@ -222,6 +222,34 @@ echo
 
 python3 -m scripts.agent.nexus_intelligence
 
+# ============================================================
+# NEXUS AI
+# ============================================================
+
+echo
+echo "===================================="
+echo "       NEXUS AI"
+echo "===================================="
+echo
+
+(
+    flock -n 9 || exit 0
+
+    timeout 20s \
+        python3 -m scripts.agent.nexus_ai \
+        >> "$NEXUS/monitoring/intelligence/ai.log" 2>&1
+
+    RESULT=$?
+
+    if [ "$RESULT" -ne 0 ]; then
+        echo "$(date -Is) NEXUS AI exited with code $RESULT" \
+            >> "$NEXUS/monitoring/intelligence/ai.log"
+    fi
+
+) 9>/tmp/nexus-ai.lock &
+
+echo "NEXUS AI analysis started in background."
+
 echo
 echo "===================================="
 echo "       NEXUS MONITOR COMPLETE"
