@@ -89,6 +89,36 @@ def format_timestamp(timestamp):
     except ValueError:
         return timestamp
 
+def load_intelligence_history():
+    """
+    Load previous NEXUS intelligence snapshots.
+    """
+
+    history = []
+
+    if not INTELLIGENCE_HISTORY.exists():
+        return history
+
+    with INTELLIGENCE_HISTORY.open(
+        "r"
+    ) as file:
+
+        for line in file:
+
+            line = line.strip()
+
+            if not line:
+                continue
+
+            try:
+                history.append(
+                    json.loads(line)
+                )
+            except json.JSONDecodeError:
+                continue
+
+    return history
+
 def build_intelligence_context():
 
     event_state = load_json(
@@ -129,6 +159,10 @@ def build_intelligence_context():
             "network_devices",
             [],
         ),
+
+        "intelligence_history":
+            load_intelligence_history(),
+
     }
 
     return context
@@ -675,6 +709,57 @@ def find_related_devices(
 
     return related
 
+def analyze_historical_pattern(
+    subject,
+    subject_type,
+    history,
+):
+    """
+    Analyze how often a situation has appeared
+    in previous NEXUS intelligence snapshots.
+    """
+
+    previous = []
+
+    for snapshot in history:
+
+        for situation in snapshot.get(
+            "situations",
+            [],
+        ):
+
+            if (
+                situation.get("subject") == subject
+                and situation.get("subject_type")
+                == subject_type
+            ):
+                previous.append(
+                    situation
+                )
+
+    occurrence_count = len(
+        previous
+    )
+
+    same_assessment_count = sum(
+        situation.get(
+            "assessment"
+        ) == previous[-1].get(
+            "assessment"
+        )
+        for situation in previous
+    ) if previous else 0
+
+    recurring = occurrence_count >= 3
+
+    return {
+        "previous_occurrences": occurrence_count,
+        "same_assessment_count": (
+            same_assessment_count
+        ),
+        "recurring": recurring,
+    }
+
 def build_situations(context):
     """
     Convert individual events into correlated
@@ -743,6 +828,17 @@ def build_situations(context):
             messages,
         )
 
+        historical_pattern = (
+            analyze_historical_pattern(
+                subject,
+                subject_type,
+                context.get(
+                    "intelligence_history",
+                    [],
+                ),
+            )
+        )
+
         assessment_result = assess_situation(
             subject_type,
             subject,
@@ -783,6 +879,8 @@ def build_situations(context):
                     "metrics"
                 ],
                 "related_devices": related_devices,
+                "historical_pattern":
+                    historical_pattern,
                 "events": messages,
             }
         )
