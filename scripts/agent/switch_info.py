@@ -8,6 +8,7 @@ import sys
 
 from scripts.agent.switch_parser import parse_switch
 from scripts.agent.device_history import update_device_history
+from scripts.agent.device_identity import resolve_inventory_identities
 
 # ============================================================
 # NEXUS SWITCH INTELLIGENCE AGENT
@@ -612,6 +613,13 @@ def main():
 
     inventory = build_inventory(
         switch
+    )
+
+    # Resolve transient switch observations to
+    # persistent NEXUS device identities before
+    # updating device history or generating events.
+    inventory = resolve_inventory_identities(
+        inventory
     )
 
     (
