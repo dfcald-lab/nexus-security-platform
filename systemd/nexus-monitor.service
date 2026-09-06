@@ -1,0 +1,22 @@
+[Unit]
+Description=NEXUS Continuous Network Monitor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=jetson
+WorkingDirectory=/home/jetson/nexus
+
+EnvironmentFile=/home/jetson/.config/nexus/nexus.env
+
+ExecStart=/usr/bin/python3 /home/jetson/nexus/scripts/nexus_monitor.py
+
+Restart=always
+RestartSec=10
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
