@@ -28,6 +28,45 @@ OLLAMA_URL = (
 
 MODEL = "qwen3:1.7b"
 
+AI_RESPONSE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "interpretation": {
+            "type": "string"
+        },
+        "confidence": {
+            "type": "string",
+            "enum": [
+                "LOW",
+                "MEDIUM",
+                "HIGH",
+            ],
+        },
+        "recommended_action": {
+            "type": "string"
+        },
+        "reasoning_summary": {
+            "type": "string"
+        },
+        "evidence_status": {
+            "type": "string",
+            "enum": [
+                "OBSERVED",
+                "POSSIBLE",
+                "UNDETERMINED",
+            ],
+        },
+    },
+    "required": [
+        "interpretation",
+        "confidence",
+        "recommended_action",
+        "reasoning_summary",
+        "evidence_status",
+    ],
+    "additionalProperties": False,
+}
+
 
 def load_json(path):
     with path.open("r") as file:
@@ -66,23 +105,31 @@ Rules:
    when appropriate.
 9. Do not invent IP addresses, devices, users, ports, vendors,
    or network actions.
-10. Do not execute commands.
-11. Do not directly modify the network.
-12. Recommended actions must be safe investigation, validation,
+10. Do not infer a specific security cause from a generic
+    network anomaly.
+11. Treat spoofing, unauthorized access, intrusion, compromise,
+    malware, or attack as hypotheses unless the supplied NEXUS
+    evidence explicitly supports that conclusion.
+12. If a security cause is only possible, identify it as POSSIBLE
+    and explain what additional evidence would be needed.
+13. When evidence_status is UNDETERMINED, do not name a specific
+    attack technique as the primary explanation. Describe the
+    observed behavior and state that the cause cannot yet be determined.
+14. When recommending additional investigation, prioritize collecting
+    corroborating evidence such as ARP, topology, device state, and
+    historical event patterns.
+15. Do not recommend investigating spoofing, unauthorized access,
+    compromise, or intrusion unless NEXUS evidence specifically
+    supports that hypothesis.
+16. Do not execute commands.
+17. Do not directly modify the network.
+18. Recommended actions must be safe investigation, validation,
     or monitoring steps.
-13. Never recommend destructive or disruptive actions.
-14. Keep the response concise and technically precise.
-
-Return ONLY valid JSON with exactly these fields:
-
-{{
-  "interpretation": "A concise interpretation supported by the evidence.",
-  "confidence": "LOW, MEDIUM, or HIGH",
-  "recommended_action": "A safe investigation, validation, or monitoring step.",
-  "reasoning_summary": "The specific evidence supporting the interpretation.",
-  "evidence_status": "OBSERVED, POSSIBLE, or UNDETERMINED"
-}}
-
+19. Never recommend destructive or disruptive actions.
+20. Keep the response concise and technically precise.
+21. Do not reinterpret a MAC address addition or removal as the
+    physical device being added to or removed from the network unless
+    NEXUS explicitly reports a device discovery/removal event.
 Interpretation rules:
 
 - OBSERVED = directly supported by the supplied NEXUS evidence.
@@ -97,18 +144,28 @@ NEXUS EVIDENCE:
 
 def call_ollama(prompt):
     """
-    Send a prompt to the local Ollama server.
+    Send a structured analysis request to the local
+    Ollama chat API.
     """
 
     payload = {
         "model": MODEL,
-        "prompt": prompt,
+        "messages": [
+            {
+                "role": "user",
+                "content": prompt,
+            }
+        ],
         "stream": False,
-        "format": "json",
+        "think": False,
+        "format": AI_RESPONSE_SCHEMA,
+        "options": {
+            "temperature": 0,
+        },
     }
 
     request = urllib.request.Request(
-        OLLAMA_URL,
+        "http://127.0.0.1:11434/api/chat",
         data=json.dumps(
             payload
         ).encode("utf-8"),
@@ -133,14 +190,19 @@ def call_ollama(prompt):
             raw
         )
 
-        model_response = response_data.get(
-            "response",
+        message = response_data.get(
+            "message",
+            {},
+        )
+
+        model_response = message.get(
+            "content",
             "",
         )
 
         if not model_response:
             raise RuntimeError(
-                "Ollama returned an empty response."
+                "Ollama returned an empty AI response."
             )
 
         return json.loads(
@@ -156,9 +218,9 @@ def call_ollama(prompt):
     except json.JSONDecodeError as error:
 
         raise RuntimeError(
-            "Ollama returned invalid JSON."
+            "Ollama returned invalid JSON: "
+            + str(error)
         ) from error
-
 
 def validate_result(result):
     """
