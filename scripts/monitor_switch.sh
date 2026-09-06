@@ -210,6 +210,18 @@ echo
 
 python3 -m scripts.agent.publish_jetson_state
 
+# ============================================================
+# NEXUS INTELLIGENCE
+# ============================================================
+
+echo
+echo "===================================="
+echo "       NEXUS INTELLIGENCE"
+echo "===================================="
+echo
+
+python3 -m scripts.agent.nexus_intelligence
+
 echo
 echo "===================================="
 echo "       NEXUS MONITOR COMPLETE"

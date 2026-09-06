@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -66,6 +67,22 @@ def load_events(path):
 
     return events
 
+def format_timestamp(timestamp):
+    """
+    Convert an ISO timestamp into a human-readable 12-hour time.
+    """
+    if not timestamp:
+        return "UNKNOWN"
+
+    try:
+        parsed = datetime.fromisoformat(timestamp)
+
+        return parsed.strftime(
+            "%B %d, %Y at %I:%M:%S %p"
+        )
+
+    except ValueError:
+        return timestamp
 
 def build_intelligence_context():
 
@@ -663,14 +680,11 @@ def publish_intelligence(context, situations):
     )
 
     output = {
-        "generated_at": context.get(
-            "last_timestamp"
-        ),
-        "active_events": len(
-            context.get(
-                "active_events",
-                [],
-            )
+        "generated_at": datetime.now(
+            timezone.utc
+        ).isoformat(),
+        "source_last_event_at": context.get(
+            "last_timestamp",
         ),
         "recent_events": len(
             context.get(
@@ -709,15 +723,32 @@ def main():
         context
     )
 
-    publish_intelligence(
+    intelligence = publish_intelligence(
         context,
         situations,
     )
 
     print()
+
     print(
         "============ NEXUS INTELLIGENCE ============"
     )
+    print()
+
+    print(
+        "Generated:",
+        format_timestamp(
+            intelligence["generated_at"]
+        ),
+    )
+
+    print(
+        "Latest event:",
+        format_timestamp(
+            intelligence["source_last_event_at"]
+        ),
+    )
+
     print()
 
     print(
