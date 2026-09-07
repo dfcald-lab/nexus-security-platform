@@ -2,7 +2,7 @@
 
 import html
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -158,6 +158,85 @@ def load_hardware_health():
         pass
 
     return default
+
+
+def calculate_ai_freshness(
+    intelligence_generated_at,
+    ai_generated_at,
+):
+    """
+    Compare the current intelligence timestamp with
+    the timestamp of the last AI result.
+
+    FRESH   <= 15 minutes
+    AGING   > 15 and <= 30 minutes
+    STALE   > 30 minutes
+    UNKNOWN invalid or missing timestamps
+    """
+
+    if not intelligence_generated_at or not ai_generated_at:
+        return {
+            "status": "UNKNOWN",
+            "age_minutes": None,
+        }
+
+    try:
+        intelligence_time = datetime.fromisoformat(
+            str(intelligence_generated_at).replace(
+                "Z",
+                "+00:00",
+            )
+        )
+
+        ai_time = datetime.fromisoformat(
+            str(ai_generated_at).replace(
+                "Z",
+                "+00:00",
+            )
+        )
+
+        if intelligence_time.tzinfo is None:
+            intelligence_time = intelligence_time.replace(
+                tzinfo=timezone.utc,
+            )
+
+        if ai_time.tzinfo is None:
+            ai_time = ai_time.replace(
+                tzinfo=timezone.utc,
+            )
+
+        age_seconds = (
+            intelligence_time - ai_time
+        ).total_seconds()
+
+        if age_seconds < 0:
+            return {
+                "status": "UNKNOWN",
+                "age_minutes": None,
+            }
+
+        age_minutes = age_seconds / 60
+
+        if age_seconds <= 900:
+            status = "FRESH"
+        elif age_seconds <= 1800:
+            status = "AGING"
+        else:
+            status = "STALE"
+
+        return {
+            "status": status,
+            "age_minutes": age_minutes,
+        }
+
+    except (
+        TypeError,
+        ValueError,
+    ):
+        return {
+            "status": "UNKNOWN",
+            "age_minutes": None,
+        }
 
 
 def esc(value):
@@ -1749,6 +1828,36 @@ h1 {{
         ai_validation_state = load_ai_validation_state()
         hardware_health = load_hardware_health()
 
+        intelligence_generated_raw = None
+
+        try:
+            intelligence_path = (
+                Path.home()
+                / "nexus"
+                / "monitoring"
+                / "intelligence"
+                / "current.json"
+            )
+
+            with intelligence_path.open() as file:
+                intelligence_data = json.load(file)
+
+            if isinstance(
+                intelligence_data,
+                dict,
+            ):
+                intelligence_generated_raw = (
+                    intelligence_data.get(
+                        "generated_at"
+                    )
+                )
+
+        except (
+            OSError,
+            json.JSONDecodeError,
+        ):
+            intelligence_generated_raw = None
+
 
         status = esc(
             state.get(
@@ -1881,6 +1990,29 @@ h1 {{
                 )
             )
         )
+
+        ai_freshness = calculate_ai_freshness(
+            intelligence_generated_raw,
+            ai_data.get(
+                "generated_at"
+            ),
+        )
+
+        ai_freshness_status = esc(
+            ai_freshness.get(
+                "status",
+                "UNKNOWN",
+            )
+        ).upper()
+
+        ai_age_minutes = ai_freshness.get(
+            "age_minutes"
+        )
+
+        if ai_age_minutes is None:
+            ai_age_display = "UNKNOWN"
+        else:
+            ai_age_display = f"{ai_age_minutes:.1f} MIN"
 
         ai_result = ai_data.get(
             "result",
@@ -2773,6 +2905,10 @@ main {{
         AI GENERATED {ai_generated_at}
         ·
         SOURCE INTELLIGENCE {ai_source_at}
+        ·
+        FRESHNESS {ai_freshness_status}
+        ·
+        AGE {ai_age_display}
     </div>
 
 </section>
