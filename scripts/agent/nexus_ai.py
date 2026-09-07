@@ -86,23 +86,22 @@ def load_trigger_state():
     default = {
         "last_run_at": None,
         "last_signature": None,
+        "current_signature": None,
+        "current_seen_at": None,
+        "trigger_status": "UNKNOWN",
     }
 
     try:
-        with AI_TRIGGER_STATE.open("r") as file:
+        with AI_TRIGGER_STATE.open() as file:
             data = json.load(file)
 
         if isinstance(data, dict):
             default.update(data)
 
-    except (
-        OSError,
-        json.JSONDecodeError,
-    ):
+    except (OSError, json.JSONDecodeError):
         pass
 
     return default
-
 
 def build_situation_signature(ai_context):
     """
@@ -181,37 +180,63 @@ def build_situation_signature(ai_context):
     )
 
 def should_run_ai(ai_context):
-    """
-    Decide whether a new AI inference should run.
-    """
-
     state = load_trigger_state()
 
-    current_signature = (
-        build_situation_signature(
-            ai_context
-        )
+    current_signature = build_situation_signature(
+        ai_context
     )
 
-    previous_signature = state.get(
+    now = datetime.now(timezone.utc)
+
+    state["current_signature"] = current_signature
+    state["current_seen_at"] = now.isoformat()
+
+    last_signature = state.get(
         "last_signature"
     )
+
+    if last_signature is None:
+        state["trigger_status"] = "PENDING"
+
+        AI_TRIGGER_STATE.write_text(
+            json.dumps(
+                state,
+                indent=2,
+            )
+        )
+
+        return True
+
+    if current_signature == last_signature:
+        state["trigger_status"] = "AVAILABLE"
+
+        AI_TRIGGER_STATE.write_text(
+            json.dumps(
+                state,
+                indent=2,
+            )
+        )
+
+        return False
 
     last_run_at = state.get(
         "last_run_at"
     )
 
-    if previous_signature is None:
-        return True
+    if not last_run_at:
+        state["trigger_status"] = "PENDING"
 
-    if current_signature == previous_signature:
-        return False
+        AI_TRIGGER_STATE.write_text(
+            json.dumps(
+                state,
+                indent=2,
+            )
+        )
 
-    if last_run_at is None:
         return True
 
     try:
-        previous_time = datetime.fromisoformat(
+        previous_run = datetime.fromisoformat(
             str(last_run_at).replace(
                 "Z",
                 "+00:00",
@@ -219,50 +244,65 @@ def should_run_ai(ai_context):
         )
 
         elapsed = (
-            datetime.now(timezone.utc)
-            - previous_time
+            now - previous_run
         ).total_seconds()
 
-        return (
-            elapsed
-            >= AI_COOLDOWN_SECONDS
+    except ValueError:
+        state["trigger_status"] = "PENDING"
+
+        AI_TRIGGER_STATE.write_text(
+            json.dumps(
+                state,
+                indent=2,
+            )
         )
 
-    except ValueError:
         return True
-def record_ai_trigger(ai_context):
-    """
-    Record the intelligence signature used
-    for the latest AI decision.
-    """
 
-    state = {
-        "last_run_at": datetime.now(
-            timezone.utc
-        ).isoformat(),
-        "last_signature": (
-            build_situation_signature(
-                ai_context
+    if elapsed >= AI_COOLDOWN_SECONDS:
+        state["trigger_status"] = "PENDING"
+
+        AI_TRIGGER_STATE.write_text(
+            json.dumps(
+                state,
+                indent=2,
             )
-        ),
-    }
+        )
 
-    AI_TRIGGER_STATE.parent.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
+        return True
 
-    with AI_TRIGGER_STATE.open(
-        "w"
-    ) as file:
+    state["trigger_status"] = "PENDING"
 
-        json.dump(
+    AI_TRIGGER_STATE.write_text(
+        json.dumps(
             state,
-            file,
             indent=2,
         )
+    )
 
-        file.write("\n")
+    return False
+
+def record_ai_trigger(ai_context):
+    now = datetime.now(timezone.utc).isoformat()
+
+    state = {
+        "last_run_at": now,
+        "last_signature": build_situation_signature(
+            ai_context
+        ),
+        "current_signature": build_situation_signature(
+            ai_context
+        ),
+        "current_seen_at": now,
+        "trigger_status": "AVAILABLE",
+    }
+
+    AI_TRIGGER_STATE.write_text(
+        json.dumps(
+            state,
+            indent=2,
+        )
+    )
 
 def build_prompt(ai_context):
     """

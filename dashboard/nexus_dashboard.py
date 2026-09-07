@@ -16,6 +16,14 @@ AI_RESULT = (
     / "ai_result.json"
 )
 
+AI_TRIGGER_STATE = (
+    Path.home()
+    / "nexus"
+    / "monitoring"
+    / "intelligence"
+    / "ai_trigger_state.json"
+)
+
 HOST = "127.0.0.1"
 PORT = 8787
 
@@ -64,6 +72,25 @@ def load_ai_result():
 
     try:
         with AI_RESULT.open() as file:
+            data = json.load(file)
+
+        if isinstance(data, dict):
+            default.update(data)
+
+    except (OSError, json.JSONDecodeError):
+        pass
+
+    return default
+
+def load_ai_trigger_state():
+    default = {
+        "trigger_status": "UNKNOWN",
+        "last_run_at": None,
+        "current_seen_at": None,
+    }
+
+    try:
+        with AI_TRIGGER_STATE.open() as file:
             data = json.load(file)
 
         if isinstance(data, dict):
@@ -1659,6 +1686,8 @@ h1 {{
 
         state = load_state()
         ai_data = load_ai_result()
+        ai_trigger_state = load_ai_trigger_state()
+
 
         status = esc(
             state.get(
@@ -1667,11 +1696,40 @@ h1 {{
             )
         ).upper()
 
-        ai_status = esc(
+        ai_status = str(
             ai_data.get(
                 "status",
                 "UNAVAILABLE",
             )
+        ).upper()
+
+        last_signature = ai_trigger_state.get(
+            "last_signature"
+        )
+
+        current_signature = ai_trigger_state.get(
+            "current_signature"
+        )
+
+        if ai_status == "UNAVAILABLE":
+            ai_display_status = "UNAVAILABLE"
+        elif (
+            current_signature
+            and last_signature
+            and current_signature != last_signature
+        ):
+            ai_display_status = "PENDING"
+        elif (
+            current_signature
+            and last_signature
+            and current_signature == last_signature
+        ):
+            ai_display_status = "AVAILABLE"
+        else:
+            ai_display_status = "UNKNOWN"
+
+        ai_status = esc(
+            ai_display_status
         ).upper()
 
         ai_model = esc(
