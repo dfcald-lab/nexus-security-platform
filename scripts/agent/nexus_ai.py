@@ -23,6 +23,15 @@ AI_OUTPUT = (
     / "ai_result.json"
 )
 
+AI_TRIGGER_STATE = (
+    NEXUS
+    / "monitoring"
+    / "intelligence"
+    / "ai_trigger_state.json"
+)
+
+AI_COOLDOWN_SECONDS = 300
+
 OLLAMA_URL = (
     "http://127.0.0.1:11434/api/generate"
 )
@@ -72,6 +81,188 @@ AI_RESPONSE_SCHEMA = {
 def load_json(path):
     with path.open("r") as file:
         return json.load(file)
+
+def load_trigger_state():
+    default = {
+        "last_run_at": None,
+        "last_signature": None,
+    }
+
+    try:
+        with AI_TRIGGER_STATE.open("r") as file:
+            data = json.load(file)
+
+        if isinstance(data, dict):
+            default.update(data)
+
+    except (
+        OSError,
+        json.JSONDecodeError,
+    ):
+        pass
+
+    return default
+
+
+def build_situation_signature(ai_context):
+    """
+    Build a stable signature from meaningful NEXUS evidence.
+
+    Timestamps and historical counters are intentionally excluded
+    so a new monitoring cycle alone does not trigger the AI.
+    """
+
+    signature_situations = []
+
+    for situation in ai_context.get(
+        "situations",
+        [],
+    ):
+
+        signature_situations.append(
+            {
+                "subject": situation.get(
+                    "subject"
+                ),
+                "subject_type": situation.get(
+                    "subject_type"
+                ),
+                "assessment": situation.get(
+                    "assessment"
+                ),
+                "risk": situation.get(
+                    "risk"
+                ),
+                "confidence": situation.get(
+                    "confidence"
+                ),
+                "event_count": situation.get(
+                    "event_count",
+                    0,
+                ),
+                "highest_score": situation.get(
+                    "highest_score",
+                    0,
+                ),
+                "metrics": situation.get(
+                    "metrics",
+                    {},
+                ),
+                "related_devices": situation.get(
+                    "related_devices",
+                    [],
+                ),
+            }
+        )
+
+    signature_situations.sort(
+        key=lambda item: (
+            str(item.get("subject")),
+            str(item.get("subject_type")),
+        )
+    )
+
+    signature_data = {
+        "active_events": ai_context.get(
+            "active_events",
+            0,
+        ),
+        "network_devices": ai_context.get(
+            "network_devices",
+            0,
+        ),
+        "situations": signature_situations,
+    }
+
+    return json.dumps(
+        signature_data,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+def should_run_ai(ai_context):
+    """
+    Decide whether a new AI inference should run.
+    """
+
+    state = load_trigger_state()
+
+    current_signature = (
+        build_situation_signature(
+            ai_context
+        )
+    )
+
+    previous_signature = state.get(
+        "last_signature"
+    )
+
+    last_run_at = state.get(
+        "last_run_at"
+    )
+
+    if previous_signature is None:
+        return True
+
+    if current_signature == previous_signature:
+        return False
+
+    if last_run_at is None:
+        return True
+
+    try:
+        previous_time = datetime.fromisoformat(
+            str(last_run_at).replace(
+                "Z",
+                "+00:00",
+            )
+        )
+
+        elapsed = (
+            datetime.now(timezone.utc)
+            - previous_time
+        ).total_seconds()
+
+        return (
+            elapsed
+            >= AI_COOLDOWN_SECONDS
+        )
+
+    except ValueError:
+        return True
+def record_ai_trigger(ai_context):
+    """
+    Record the intelligence signature used
+    for the latest AI decision.
+    """
+
+    state = {
+        "last_run_at": datetime.now(
+            timezone.utc
+        ).isoformat(),
+        "last_signature": (
+            build_situation_signature(
+                ai_context
+            )
+        ),
+    }
+
+    AI_TRIGGER_STATE.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    with AI_TRIGGER_STATE.open(
+        "w"
+    ) as file:
+
+        json.dump(
+            state,
+            file,
+            indent=2,
+        )
+
+        file.write("\n")
 
 def build_prompt(ai_context):
     """
@@ -369,6 +560,17 @@ def main():
             "No ai_context found in current intelligence."
         )
 
+    if not should_run_ai(
+        ai_context
+    ):
+
+        print(
+            "NEXUS AI skipped: "
+            "no meaningful change or cooldown active."
+        )
+
+        return
+
     prompt = build_prompt(
         ai_context
     )
@@ -384,6 +586,10 @@ def main():
     output = publish_result(
         result,
         ai_data,
+    )
+
+    record_ai_trigger(
+        ai_context
     )
 
     print()
@@ -416,7 +622,6 @@ def main():
         result["reasoning_summary"],
     )
     print()
-
 
 if __name__ == "__main__":
     main()
