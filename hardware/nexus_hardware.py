@@ -152,7 +152,16 @@ def show_screen(lines):
             y,
         )
 
-    oled.display(image)
+    try:
+        oled.display(image)
+    except (
+        OSError,
+        TimeoutError,
+    ) as error:
+        print(
+            f"OLED: DISPLAY FAILED: {error}",
+            flush=True,
+        )
 
 
 def set_led(severity, active_events):
