@@ -45,6 +45,7 @@ AI_VALIDATION_STATE = (
 
 
 AI_COOLDOWN_SECONDS = 300
+AI_STALE_SECONDS = 1800
 
 OLLAMA_URL = (
     "http://127.0.0.1:11434/api/generate"
@@ -193,6 +194,66 @@ def build_situation_signature(ai_context):
         separators=(",", ":"),
     )
 
+def ai_result_is_stale(ai_context, now):
+    try:
+        intelligence_generated_at = (
+            ai_context.get("generated_at")
+        )
+
+        if not intelligence_generated_at:
+            intelligence_data = load_json(
+                INTELLIGENCE_CURRENT
+            )
+
+            intelligence_generated_at = (
+                intelligence_data.get(
+                    "generated_at"
+                )
+            )
+
+        ai_data = load_json(AI_OUTPUT)
+        ai_generated_at = ai_data.get(
+            "generated_at"
+        )
+
+        if not intelligence_generated_at:
+            return True
+
+        if not ai_generated_at:
+            return True
+
+        intelligence_time = datetime.fromisoformat(
+            str(intelligence_generated_at).replace(
+                "Z",
+                "+00:00",
+            )
+        )
+
+        ai_time = datetime.fromisoformat(
+            str(ai_generated_at).replace(
+                "Z",
+                "+00:00",
+            )
+        )
+
+        age = (
+            intelligence_time - ai_time
+        ).total_seconds()
+
+        if age < 0:
+            return False
+
+        return age > AI_STALE_SECONDS
+
+    except (
+        OSError,
+        json.JSONDecodeError,
+        TypeError,
+        ValueError,
+    ):
+        return True
+
+
 def should_run_ai(ai_context):
     state = load_trigger_state()
 
@@ -209,6 +270,80 @@ def should_run_ai(ai_context):
         "last_signature"
     )
 
+    last_attempt_status = str(
+        state.get(
+            "last_attempt_status",
+            "",
+        )
+    ).upper()
+
+    if (
+        current_signature == last_signature
+        and last_attempt_status == "REJECTED"
+    ):
+        last_run_at = state.get(
+            "last_run_at"
+        )
+
+        if not last_run_at:
+            state["trigger_status"] = "PENDING"
+
+            AI_TRIGGER_STATE.write_text(
+                json.dumps(
+                    state,
+                    indent=2,
+                )
+            )
+
+            return True
+
+        try:
+            previous_run = datetime.fromisoformat(
+                str(last_run_at).replace(
+                    "Z",
+                    "+00:00",
+                )
+            )
+
+            elapsed = (
+                now - previous_run
+            ).total_seconds()
+
+        except ValueError:
+            state["trigger_status"] = "PENDING"
+
+            AI_TRIGGER_STATE.write_text(
+                json.dumps(
+                    state,
+                    indent=2,
+                )
+            )
+
+            return True
+
+        if elapsed >= AI_COOLDOWN_SECONDS:
+            state["trigger_status"] = "PENDING"
+
+            AI_TRIGGER_STATE.write_text(
+                json.dumps(
+                    state,
+                    indent=2,
+                )
+            )
+
+            return True
+
+        state["trigger_status"] = "PENDING"
+
+        AI_TRIGGER_STATE.write_text(
+            json.dumps(
+                state,
+                indent=2,
+            )
+        )
+
+        return False
+
     if last_signature is None:
         state["trigger_status"] = "PENDING"
 
@@ -222,6 +357,73 @@ def should_run_ai(ai_context):
         return True
 
     if current_signature == last_signature:
+        if ai_result_is_stale(
+            ai_context,
+            now,
+        ):
+            last_run_at = state.get(
+                "last_run_at"
+            )
+
+            if not last_run_at:
+                state["trigger_status"] = "PENDING"
+
+                AI_TRIGGER_STATE.write_text(
+                    json.dumps(
+                        state,
+                        indent=2,
+                    )
+                )
+
+                return True
+
+            try:
+                previous_run = datetime.fromisoformat(
+                    str(last_run_at).replace(
+                        "Z",
+                        "+00:00",
+                    )
+                )
+
+                elapsed = (
+                    now - previous_run
+                ).total_seconds()
+
+            except ValueError:
+                state["trigger_status"] = "PENDING"
+
+                AI_TRIGGER_STATE.write_text(
+                    json.dumps(
+                        state,
+                        indent=2,
+                    )
+                )
+
+                return True
+
+            if elapsed >= AI_COOLDOWN_SECONDS:
+                state["trigger_status"] = "PENDING"
+
+                AI_TRIGGER_STATE.write_text(
+                    json.dumps(
+                        state,
+                        indent=2,
+                    )
+                )
+
+                return True
+
+            state["trigger_status"] = "PENDING"
+
+            AI_TRIGGER_STATE.write_text(
+                json.dumps(
+                    state,
+                    indent=2,
+                )
+            )
+
+            return False
+
         state["trigger_status"] = "AVAILABLE"
 
         AI_TRIGGER_STATE.write_text(
@@ -308,6 +510,9 @@ def record_ai_trigger(ai_context):
             ai_context
         ),
         "current_seen_at": now,
+        "last_attempt_at": now,
+        "last_attempt_status": "AVAILABLE",
+        "last_attempt_error": None,
         "trigger_status": "AVAILABLE",
     }
 
@@ -613,6 +818,7 @@ def validate_evidence_language(result):
     )
 
     fields_to_check = (
+        "interpretation",
         "recommended_action",
         "reasoning_summary",
     )
@@ -636,6 +842,36 @@ def validate_evidence_language(result):
                 )
 
     return result
+
+
+def record_ai_validation_success(
+    intelligence,
+):
+    """
+    Record that the latest AI result passed NEXUS validation.
+    A previous rejection is therefore no longer current.
+    """
+
+    now = datetime.now(
+        timezone.utc
+    ).isoformat()
+
+    validation_state = {
+        "status": "PASSED",
+        "attempted_at": now,
+        "source_intelligence_at": intelligence.get(
+            "generated_at"
+        ),
+        "error": None,
+    }
+
+    AI_VALIDATION_STATE.write_text(
+        json.dumps(
+            validation_state,
+            indent=2,
+        )
+        + "\n"
+    )
 
 
 def record_ai_rejection(
@@ -799,6 +1035,10 @@ def main():
     output = publish_result(
         result,
         ai_data,
+    )
+
+    record_ai_validation_success(
+        ai_data
     )
 
     record_ai_trigger(
