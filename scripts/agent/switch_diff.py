@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import json
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -11,11 +12,16 @@ from scripts.agent.event_classifier import classify_event
 # NEXUS SWITCH CHANGE DETECTOR
 # ============================================================
 
-EVENT_DIR = (
-    Path.home()
-    / "nexus"
-    / "monitoring"
-    / "events"
+EVENT_DIR = Path(
+    os.environ.get(
+        "NEXUS_EVENT_DIR",
+        str(
+            Path.home()
+            / "nexus"
+            / "monitoring"
+            / "events"
+        ),
+    )
 )
 
 EVENT_LOG = EVENT_DIR / "events.jsonl"

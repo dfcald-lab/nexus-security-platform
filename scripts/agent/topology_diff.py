@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import json
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -8,7 +9,17 @@ from pathlib import Path
 
 NEXUS = Path.home() / "nexus"
 
-EVENT_DIR = NEXUS / "monitoring" / "events"
+EVENT_DIR = Path(
+    os.environ.get(
+        "NEXUS_EVENT_DIR",
+        str(
+            NEXUS
+            / "monitoring"
+            / "events"
+        ),
+    )
+)
+
 EVENT_LOG = EVENT_DIR / "events.jsonl"
 
 

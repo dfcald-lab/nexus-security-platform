@@ -2,10 +2,11 @@
 
 import argparse
 import json
+import os
 import subprocess
 
 
-JETSON_HOST = "192.0.2.26"
+JETSON_HOST = os.environ.get("NEXUS_JETSON_HOST", "127.0.0.1")
 JETSON_USER = "jetson"
 SSH_KEY = "~/.ssh/nexus_jetson"
 

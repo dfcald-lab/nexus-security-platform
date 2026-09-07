@@ -4,6 +4,16 @@ set -e
 
 NEXUS="$HOME/nexus"
 
+# Prevent overlapping monitor cycles from modifying
+# the same snapshots and topology files.
+exec 9>/tmp/nexus-monitor.lock
+
+if ! flock -n 9; then
+    echo "NEXUS monitor cycle already running."
+    echo "Skipping overlapping cycle."
+    exit 0
+fi
+
 SNAPSHOT_DIR="$NEXUS/monitoring/snapshots"
 TOPOLOGY_DIR="$NEXUS/monitoring/topology"
 JETSON_DIR="$NEXUS/monitoring/endpoints"
@@ -172,6 +182,27 @@ fi
 # ============================================================
 
 mv "$CURRENT" "$PREVIOUS"
+
+# ============================================================
+# JETSON THERMAL STATE
+# ============================================================
+
+echo
+echo "===================================="
+echo "       JETSON THERMAL STATE"
+echo "===================================="
+echo
+
+if python3 -m scripts.agent.telemetry_state; then
+    echo "Thermal state processing completed."
+else
+    TELEMETRY_RESULT=$?
+
+    echo
+    echo "Thermal state processing failed."
+    echo "Continuing network monitoring."
+    echo "Telemetry exit code: $TELEMETRY_RESULT"
+fi
 
 # ============================================================
 # EVENT STATE

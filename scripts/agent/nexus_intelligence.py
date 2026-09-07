@@ -1,36 +1,59 @@
 #!/usr/bin/env python3
 
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 
 
 NEXUS = Path.home() / "nexus"
 
-EVENT_STATE = (
-    NEXUS
-    / "monitoring"
-    / "events"
-    / "event_state.json"
+EVENT_DIR = Path(
+    os.environ.get(
+        "NEXUS_EVENT_DIR",
+        str(
+            NEXUS
+            / "monitoring"
+            / "events"
+        ),
+    )
 )
 
-EVENT_LOG = (
-    NEXUS
-    / "monitoring"
-    / "events"
-    / "events.jsonl"
+EVENT_STATE = EVENT_DIR / "event_state.json"
+
+EVENT_LOG = EVENT_DIR / "events.jsonl"
+
+TELEMETRY_FILE = Path(
+    os.environ.get(
+        "NEXUS_TELEMETRY_FILE",
+        str(
+            NEXUS
+            / "hardware"
+            / "telemetry.json"
+        ),
+    )
 )
 
-JETSON_STATE = (
-    NEXUS
-    / "hardware"
-    / "state.json"
+JETSON_STATE = Path(
+    os.environ.get(
+        "NEXUS_JETSON_STATE",
+        str(
+            NEXUS
+            / "hardware"
+            / "state.json"
+        ),
+    )
 )
 
-INTELLIGENCE_DIR = (
-    NEXUS
-    / "monitoring"
-    / "intelligence"
+INTELLIGENCE_DIR = Path(
+    os.environ.get(
+        "NEXUS_INTELLIGENCE_DIR",
+        str(
+            NEXUS
+            / "monitoring"
+            / "intelligence"
+        ),
+    )
 )
 
 INTELLIGENCE_CURRENT = (
@@ -43,9 +66,27 @@ INTELLIGENCE_HISTORY = (
     / "history.jsonl"
 )
 
-def load_json(path):
-    with open(path, "r") as f:
-        return json.load(f)
+def load_json(
+    path,
+    default=None,
+):
+    try:
+        with open(
+            path,
+            "r",
+            encoding="utf-8",
+        ) as f:
+            return json.load(f)
+
+    except (
+        OSError,
+        json.JSONDecodeError,
+    ):
+        return (
+            {}
+            if default is None
+            else default
+        )
 
 
 def load_events(path):
@@ -133,6 +174,11 @@ def build_intelligence_context():
         EVENT_LOG
     )
 
+    telemetry = load_json(
+        TELEMETRY_FILE,
+        {},
+    )
+
     context = {
         "intelligence_generated_at": (
             datetime.now(
@@ -164,6 +210,8 @@ def build_intelligence_context():
             "network_devices",
             [],
         ),
+
+        "telemetry": telemetry,
 
         "intelligence_history":
             load_intelligence_history(),
@@ -609,6 +657,196 @@ def assess_situation(
                 "review recent MAC and topology changes."
             )
 
+    elif subject_type == "SYSTEM_HEALTH":
+
+        telemetry = device_context.get(
+            "telemetry",
+            {},
+        )
+
+        temperatures = telemetry.get(
+            "temperature_c",
+            {},
+        )
+
+        thermal_states = telemetry.get(
+            "thermal_state",
+            {},
+        )
+
+        if subject == "THERMAL INCIDENT":
+
+            affected_sensors = {}
+
+            sensor_names = {
+                "GPU": "gpu",
+                "TJ": "tj",
+                "CPU": "cpu",
+            }
+
+            for event in events:
+
+                event_message = event.get(
+                    "message",
+                    "",
+                )
+
+                for marker, sensor in sensor_names.items():
+
+                    if f"on {marker}:" in event_message:
+
+                        affected_sensors[sensor] = {
+                            "temperature_c": temperatures.get(
+                                sensor
+                            ),
+                            "thermal_state": thermal_states.get(
+                                sensor,
+                                "UNKNOWN",
+                            ),
+                        }
+
+                    elif (
+                        f"on {marker}:"
+                        not in event_message
+                    ):
+                        continue
+
+            sensor_states = [
+                data["thermal_state"]
+                for data in affected_sensors.values()
+            ]
+
+            if "CRITICAL" in sensor_states:
+
+                risk = "CRITICAL"
+
+            elif (
+                "HIGH" in sensor_states
+                or "ELEVATED" in sensor_states
+            ):
+
+                risk = "REVIEW"
+
+            else:
+
+                risk = "NORMAL"
+
+            confidence = "HIGH"
+
+            explanation = (
+                f"Thermal incident involves "
+                f"{len(affected_sensors)} monitored "
+                "sensor(s)."
+            )
+
+            investigation = (
+                "Review affected thermal sensors, "
+                "system workload, cooling conditions, "
+                "and telemetry for persistence."
+            )
+
+            return {
+                "assessment": (
+                    "THERMAL CONDITION"
+                ),
+                "risk": risk,
+                "confidence": confidence,
+                "explanation": explanation,
+                "investigation": investigation,
+                "metrics": {
+                    "temperature_c": {
+                        sensor: data[
+                            "temperature_c"
+                        ]
+                        for sensor, data
+                        in affected_sensors.items()
+                    },
+                    "thermal_state": {
+                        sensor: data[
+                            "thermal_state"
+                        ]
+                        for sensor, data
+                        in affected_sensors.items()
+                    },
+                    "event_type": "system_health",
+                },
+            }
+
+        sensor_key = subject.lower()
+
+        temperature = temperatures.get(
+            sensor_key
+        )
+
+        thermal_state = thermal_states.get(
+            sensor_key,
+            "UNKNOWN",
+        )
+
+        assessment = (
+            "THERMAL CONDITION"
+        )
+
+        risk = "NORMAL"
+        confidence = "HIGH"
+
+        if thermal_state == "CRITICAL":
+
+            risk = "CRITICAL"
+            confidence = "HIGH"
+
+        elif thermal_state == "HIGH":
+
+            risk = "REVIEW"
+            confidence = "HIGH"
+
+        elif thermal_state == "ELEVATED":
+
+            risk = "REVIEW"
+            confidence = "HIGH"
+
+        elif thermal_state == "NORMAL":
+
+            risk = "NORMAL"
+            confidence = "HIGH"
+
+        else:
+
+            risk = "NORMAL"
+            confidence = "LOW"
+
+        explanation = (
+            f"{subject} thermal state is "
+            f"{thermal_state}."
+        )
+
+        if temperature is not None:
+
+            explanation = (
+                f"{subject} temperature is "
+                f"{temperature:.1f}C with "
+                f"thermal state {thermal_state}."
+            )
+
+        investigation = (
+            "Review current system workload, "
+            "cooling conditions, and telemetry "
+            "for persistence."
+        )
+
+        return {
+            "assessment": assessment,
+            "risk": risk,
+            "confidence": confidence,
+            "explanation": explanation,
+            "investigation": investigation,
+            "metrics": {
+                "temperature_c": temperature,
+                "thermal_state": thermal_state,
+                "event_type": "system_health",
+            },
+        }
+
     elif subject_type == "NETWORK":
 
         if highest_score == 0:
@@ -864,6 +1102,35 @@ def build_situations(context):
         recent_events
     )
 
+    # Correlate all system-health thermal events into
+    # one thermal incident while preserving each
+    # individual sensor event.
+    thermal_events = []
+
+    for subject, events in groups.items():
+
+        for event in events:
+
+            if event.get("event_type") == "system_health":
+                thermal_events.append(event)
+
+    if thermal_events:
+        groups["THERMAL INCIDENT"] = thermal_events
+
+        for subject in list(groups):
+            if subject != "THERMAL INCIDENT":
+
+                remaining = [
+                    event
+                    for event in groups[subject]
+                    if event.get("event_type") != "system_health"
+                ]
+
+                if remaining:
+                    groups[subject] = remaining
+                else:
+                    del groups[subject]
+
     situations = []
 
     for subject, events in groups.items():
@@ -895,7 +1162,16 @@ def build_situations(context):
             for event in events
         ]
 
-        if subject.startswith("Fa"):
+        if any(
+            event.get(
+                "event_type"
+            ) == "system_health"
+            for event in events
+        ):
+
+            subject_type = "SYSTEM_HEALTH"
+
+        elif subject.startswith("Fa"):
 
             subject_type = "PORT"
 
@@ -918,14 +1194,22 @@ def build_situations(context):
         )
 
 
+        assessment_context = {
+            "network_devices": context.get(
+                "network_devices",
+                [],
+            ),
+            "telemetry": context.get(
+                "telemetry",
+                {},
+            ),
+        }
+
         assessment_result = assess_situation(
             subject_type,
             subject,
             events,
-            context.get(
-                "network_devices",
-                {},
-            ),
+            assessment_context,
         )
 
         assessment = assessment_result[
@@ -1114,6 +1398,10 @@ def build_ai_context(
                 [],
             )
         ),
+        "telemetry": context.get(
+            "telemetry",
+            {},
+        ),
         "situations": ai_situations,
         "response_contract": (
             build_ai_response_contract()
@@ -1128,7 +1416,7 @@ def build_ai_response_contract():
     return {
         "interpretation": (
             "A concise explanation of what the "
-            "current network situation likely means."
+            "current NEXUS situation likely means."
         ),
         "confidence": (
             "AI confidence in the interpretation."

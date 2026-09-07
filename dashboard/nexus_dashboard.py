@@ -2,11 +2,24 @@
 
 import html
 import json
+import sys
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+NEXUS_ROOT = Path.home() / "nexus"
+
+if str(NEXUS_ROOT) not in sys.path:
+    sys.path.insert(0, str(NEXUS_ROOT))
+
+from scripts.operator.nexus_operator import (
+    HTB_SESSION_DIR,
+    call_ollama,
+    htb_prompt,
+)
+
 STATE = Path.home() / "nexus" / "hardware" / "state.json"
+
 
 AI_RESULT = (
     Path.home()
@@ -37,6 +50,13 @@ HARDWARE_HEALTH = (
     / "nexus"
     / "hardware"
     / "health.json"
+)
+
+HTB_SESSION_DIR = (
+    Path.home()
+    / "nexus"
+    / "operator"
+    / "htb_sessions"
 )
 
 HOST = "127.0.0.1"
@@ -409,9 +429,1542 @@ def event_row(event, index):
     )
 
 
+def load_htb_sessions():
+    sessions = []
+
+    if not HTB_SESSION_DIR.exists():
+        return sessions
+
+    try:
+
+        paths = sorted(
+            HTB_SESSION_DIR.glob("*.json")
+        )
+
+    except OSError:
+        return sessions
+
+    for path in paths:
+
+        try:
+
+            with path.open(
+                "r",
+                encoding="utf-8",
+            ) as file:
+
+                session = json.load(
+                    file
+                )
+
+        except (
+            OSError,
+            json.JSONDecodeError,
+        ):
+            continue
+
+        if not isinstance(
+            session,
+            dict,
+        ):
+            continue
+
+        session.setdefault(
+            "name",
+            path.stem,
+        )
+
+        session.setdefault(
+            "target",
+            "",
+        )
+
+        session.setdefault(
+            "findings",
+            [],
+        )
+
+        session.setdefault(
+            "notes",
+            [],
+        )
+
+        sessions.append(
+            session
+        )
+
+    sessions.sort(
+        key=lambda session: str(
+            session.get(
+                "updated_at",
+                "",
+            )
+        ),
+        reverse=True,
+    )
+
+    return sessions
+
+
+def save_htb_session(session):
+    name = str(
+        session.get(
+            "name",
+            "",
+        )
+    )
+
+    if not name:
+        raise RuntimeError(
+            "HTB session has no name."
+        )
+
+    safe_name = Path(name).name
+
+    if safe_name != name:
+        raise RuntimeError(
+            "Invalid HTB session name."
+        )
+
+    HTB_SESSION_DIR.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    path = (
+        HTB_SESSION_DIR
+        / f"{safe_name}.json"
+    )
+
+    with path.open(
+        "w",
+        encoding="utf-8",
+    ) as file:
+
+        json.dump(
+            session,
+            file,
+            indent=2,
+        )
+
+        file.write("\n")
+
+
+def load_htb_session(name):
+    safe_name = Path(name).name
+
+    if safe_name != name:
+        return None
+
+    path = (
+        HTB_SESSION_DIR
+        / f"{safe_name}.json"
+    )
+
+    try:
+
+        with path.open(
+            "r",
+            encoding="utf-8",
+        ) as file:
+
+            session = json.load(
+                file
+            )
+
+    except (
+        OSError,
+        json.JSONDecodeError,
+    ):
+
+        return None
+
+    if not isinstance(
+        session,
+        dict,
+    ):
+
+        return None
+
+    session.setdefault(
+        "name",
+        safe_name,
+    )
+
+    session.setdefault(
+        "target",
+        "",
+    )
+
+    session.setdefault(
+        "findings",
+        [],
+    )
+
+    session.setdefault(
+        "notes",
+        [],
+    )
+
+    session.setdefault(
+        "services",
+        [],
+    )
+
+    session.setdefault(
+        "research",
+        [],
+    )
+
+    return session
+
+
+
+def htb_research_html(session, evidence):
+
+    """
+    Render persisted HTB research records.
+
+    The dashboard only displays research already stored
+    in the HTB session JSON. It does not perform CVE
+    searches or execute exploit code.
+    """
+
+    research = session.get(
+        "research",
+        [],
+    )
+
+    if not isinstance(
+        research,
+        list,
+    ):
+        research = []
+
+    total_cves = 0
+    total_exploits = 0
+
+    sections = []
+
+    for record in research:
+
+        if not isinstance(
+            record,
+            dict,
+        ):
+            continue
+
+        service = esc(
+            record.get(
+                "service",
+                "UNKNOWN",
+            )
+        )
+
+        version = esc(
+            record.get(
+                "version",
+                "VERSION UNKNOWN",
+            )
+            or "VERSION UNKNOWN"
+        )
+
+        port = esc(
+            record.get(
+                "port",
+                "UNKNOWN",
+            )
+        )
+
+        protocol = esc(
+            record.get(
+                "protocol",
+                "UNKNOWN",
+            )
+        )
+
+        nvd_results = record.get(
+            "nvd_results",
+            [],
+        )
+
+        if not isinstance(
+            nvd_results,
+            list,
+        ):
+            nvd_results = []
+
+        total_cves += len(
+            nvd_results
+        )
+
+        cve_rows = []
+
+        for cve in nvd_results:
+
+            if not isinstance(
+                cve,
+                dict,
+            ):
+                continue
+
+            cve_id = esc(
+                cve.get(
+                    "cve",
+                    "UNKNOWN",
+                )
+            )
+
+            cvss = cve.get(
+                "cvss"
+            )
+
+            if cvss is None:
+                cvss_display = "N/A"
+            else:
+                cvss_display = esc(
+                    cvss
+                )
+
+            match_status = esc(
+                cve.get(
+                    "version_status",
+                    cve.get(
+                        "match_status",
+                        "UNKNOWN",
+                    ),
+                )
+            )
+
+            exploitability = esc(
+                cve.get(
+                    "exploitability_status",
+                    "UNCONFIRMED",
+                )
+            )
+
+            requirement = esc(
+                cve.get(
+                    "requirement",
+                    "UNKNOWN",
+                )
+            )
+
+            platform = esc(
+                cve.get(
+                    "platform",
+                    "UNSPECIFIED",
+                )
+            )
+
+            description = esc(
+                cve.get(
+                    "description",
+                    "",
+                )
+            )
+
+            conditions = cve.get(
+                "conditions",
+                [],
+            )
+
+            if not isinstance(
+                conditions,
+                list,
+            ):
+                conditions = []
+
+            evidence_assessment = cve.get(
+                "evidence_assessment",
+                {},
+            )
+
+            if not isinstance(
+                evidence_assessment,
+                dict,
+            ):
+                evidence_assessment = {}
+
+            condition_evidence = evidence_assessment.get(
+                "conditions",
+                [],
+            )
+
+            if not isinstance(
+                condition_evidence,
+                list,
+            ):
+                condition_evidence = []
+
+            condition_html = htb_condition_html(
+                conditions,
+                condition_evidence,
+            )
+
+            exploitability_state = htb_exploitability_state(
+                conditions,
+                condition_evidence,
+                exploitability,
+            )
+
+            exploitability = esc(
+                exploitability_state
+            )
+
+            exploit_db = cve.get(
+                "exploit_db",
+                {},
+            )
+
+            if not isinstance(
+                exploit_db,
+                dict,
+            ):
+                exploit_db = {}
+
+            exploit_refs = exploit_db.get(
+                "results",
+                [],
+            )
+
+            if not isinstance(
+                exploit_refs,
+                list,
+            ):
+                exploit_refs = []
+
+            total_exploits += len(
+                exploit_refs
+            )
+
+            exploit_html = ""
+
+            for exploit in exploit_refs:
+
+                if not isinstance(
+                    exploit,
+                    dict,
+                ):
+                    continue
+
+                edb_id = esc(
+                    exploit.get(
+                        "edb_id",
+                        "UNKNOWN",
+                    )
+                )
+
+                title = esc(
+                    exploit.get(
+                        "title",
+                        "Exploit-DB reference",
+                    )
+                )
+
+                exploit_url = esc(
+                    exploit.get(
+                        "url",
+                        "",
+                    )
+                )
+
+                exploit_html += (
+                    '<div class="htb-exploit">'
+                    f'<strong>EDB-{edb_id}</strong>'
+                    f' · {title} '
+                    f'<a href="{exploit_url}" target="_blank" '
+                    'rel="noopener noreferrer">VIEW →</a>'
+                    '</div>'
+                )
+
+            if not exploit_html:
+                exploit_html = (
+                    '<div class="muted">'
+                    'No Exploit-DB reference found'
+                    '</div>'
+                )
+
+            severity = "normal"
+
+            try:
+                score = float(
+                    cvss
+                )
+
+                if score >= 9.0:
+                    severity = "critical"
+                elif score >= 7.0:
+                    severity = "high"
+                elif score >= 4.0:
+                    severity = "medium"
+                else:
+                    severity = "info"
+
+            except (
+                TypeError,
+                ValueError,
+            ):
+                pass
+
+            cve_rows.append(
+                '<div class="htb-cve">'
+                '<div class="htb-cve-header">'
+                f'<div class="htb-cve-title">{cve_id}</div>'
+                f'<div class="htb-cve-score {severity}">'
+                f'CVSS {cvss_display}'
+                '</div>'
+                '</div>'
+
+                '<div class="htb-status-grid">'
+                '<div>'
+                '<div class="htb-mini-label">VERSION</div>'
+                f'<div>{match_status}</div>'
+                '</div>'
+
+                '<div>'
+                '<div class="htb-mini-label">EXPLOITABILITY</div>'
+                f'<div>{exploitability}</div>'
+                '</div>'
+
+                '<div>'
+                '<div class="htb-mini-label">REQUIREMENT</div>'
+                f'<div>{requirement}</div>'
+                '</div>'
+
+                '<div>'
+                '<div class="htb-mini-label">PLATFORM</div>'
+                f'<div>{platform}</div>'
+                '</div>'
+                '</div>'
+
+                '<div class="htb-subsection">'
+                '<div class="htb-mini-label">CONDITIONS TO VERIFY</div>'
+                f'<div class="htb-conditions">{condition_html}</div>'
+                '</div>'
+
+                '<div class="htb-subsection">'
+                '<div class="htb-mini-label">DESCRIPTION</div>'
+                f'<div class="htb-description">{description}</div>'
+                '</div>'
+
+                '<div class="htb-subsection">'
+                '<div class="htb-mini-label">EXPLOIT REFERENCES</div>'
+                f'{exploit_html}'
+                '</div>'
+
+                '<div class="htb-links">'
+                f'<a href="{esc(cve.get("url", ""))}" '
+                'target="_blank" rel="noopener noreferrer">'
+                'VIEW NVD →'
+                '</a>'
+                '</div>'
+
+                '</div>'
+            )
+
+        if not cve_rows:
+            cve_rows.append(
+                '<div class="muted">'
+                'No version-matched CVEs stored.'
+                '</div>'
+            )
+
+        sections.append(
+            '<div class="htb-research-service">'
+            '<div class="htb-service-header">'
+            f'<div><strong>{service}</strong> '
+            f'{version}</div>'
+            f'<div>{port}/{protocol}</div>'
+            '</div>'
+            + "".join(cve_rows)
+            + '</div>'
+        )
+
+    if not sections:
+        return (
+            '<div class="muted">'
+            'No research records available. '
+            'Run the HTB research command first.'
+            '</div>'
+        )
+
+    summary = (
+        '<div class="htb-research-summary">'
+        f'<div><strong>{total_cves}</strong>'
+        '<span>affected-version matches</span></div>'
+        f'<div><strong>{total_exploits}</strong>'
+        '<span>Exploit-DB references</span></div>'
+        '</div>'
+    )
+
+    return (
+        summary
+        + "".join(sections)
+    )
+
+def htb_condition_evidence(condition, evidence):
+    """
+    Determine the evidence state for one CVE condition.
+
+    VERIFIED:
+        Matching evidence explicitly confirms the condition.
+
+    CONTRADICTED:
+        Matching evidence explicitly says the condition is absent.
+
+    UNKNOWN:
+        No evidence currently establishes the condition.
+    """
+
+    condition_text = str(
+        condition or ""
+    ).strip().lower()
+
+    if not condition_text:
+        return "UNKNOWN"
+
+    verified = False
+    contradicted = False
+
+    for item in evidence:
+
+        if not isinstance(
+            item,
+            dict,
+        ):
+            continue
+
+        item_condition = str(
+            item.get(
+                "condition",
+                "",
+            )
+        ).strip().lower()
+
+        if item_condition != condition_text:
+            continue
+
+        status = str(
+            item.get(
+                "status",
+                "",
+            )
+        ).strip().upper()
+
+        if status == "VERIFIED":
+            verified = True
+
+        elif status == "CONTRADICTED":
+            contradicted = True
+
+    if verified:
+        return "VERIFIED"
+
+    if contradicted:
+        return "CONTRADICTED"
+
+    return "UNKNOWN"
+
+
+def htb_exploitability_state(
+    conditions,
+    evidence,
+    current_status="UNCONFIRMED",
+):
+    """
+    Deterministically summarize prerequisite evidence.
+
+    UNCONFIRMED:
+        No prerequisite conditions are verified.
+
+    PARTIALLY VERIFIED:
+        At least one condition is verified, but not all.
+
+    CONDITIONS SATISFIED:
+        Every extracted prerequisite condition is verified.
+
+    BLOCKED:
+        At least one prerequisite condition is contradicted.
+
+    This does not claim that exploitation succeeded.
+    """
+
+    if not conditions:
+        return "UNCONFIRMED"
+
+    verified = 0
+    contradicted = 0
+
+    for condition in conditions:
+        state = htb_condition_evidence(
+            condition,
+            evidence,
+        )
+
+        if state == "VERIFIED":
+            verified += 1
+
+        elif state == "CONTRADICTED":
+            contradicted += 1
+
+    if contradicted:
+        return "BLOCKED"
+
+    if verified == len(conditions):
+        return "CONDITIONS SATISFIED"
+
+    if verified > 0:
+        return "PARTIALLY VERIFIED"
+
+    return "UNCONFIRMED"
+
+
+def htb_condition_html(
+    conditions,
+    evidence,
+):
+    """
+    Render CVE conditions with deterministic
+    evidence coverage.
+    """
+
+    if not conditions:
+        return (
+            '<div class="htb-condition-summary">'
+            'No specific conditions extracted'
+            '</div>'
+        )
+
+    rows = []
+
+    verified_count = 0
+    contradicted_count = 0
+
+    for condition in conditions:
+
+        state = htb_condition_evidence(
+            condition,
+            evidence,
+        )
+
+        if state == "VERIFIED":
+            icon = "✓"
+            css_class = "verified"
+            verified_count += 1
+
+        elif state == "CONTRADICTED":
+            icon = "✗"
+            css_class = "contradicted"
+            contradicted_count += 1
+
+        else:
+            icon = "?"
+            css_class = "unknown"
+
+        rows.append(
+            '<div class="htb-condition-row">'
+            f'<span class="htb-condition-icon {css_class}">'
+            f'{icon}'
+            '</span>'
+            f'<span class="htb-condition-text">'
+            f'{esc(condition)}'
+            '</span>'
+            f'<span class="htb-condition-state {css_class}">'
+            f'{state}'
+            '</span>'
+            '</div>'
+        )
+
+    unknown_count = (
+        len(conditions)
+        - verified_count
+        - contradicted_count
+    )
+
+    summary = (
+        '<div class="htb-condition-summary">'
+        f'<strong>{verified_count}/{len(conditions)}</strong>'
+        ' VERIFIED'
+        f' · {unknown_count} UNKNOWN'
+        f' · {contradicted_count} CONTRADICTED'
+        '</div>'
+    )
+
+    return (
+        '<div class="htb-condition-list">'
+        + ''.join(rows)
+        + '</div>'
+        + summary
+    )
+
+
+def htb_session_row(session):
+    name = esc(
+        session.get(
+            "name",
+            "UNKNOWN",
+        )
+    )
+
+    target = esc(
+        session.get(
+            "target",
+            "Not set",
+        )
+        or "Not set"
+    )
+
+    findings = session.get(
+        "findings",
+        [],
+    )
+
+    notes = session.get(
+        "notes",
+        [],
+    )
+
+    if not isinstance(
+        findings,
+        list,
+    ):
+        findings = []
+
+    if not isinstance(
+        notes,
+        list,
+    ):
+        notes = []
+
+    return (
+        '<div class="htb-row">'
+        f'<div class="htb-title">{name}</div>'
+        f'<div class="htb-target">{target}</div>'
+        f'<div class="htb-meta">'
+        f'{len(findings)} findings · '
+        f'{len(notes)} notes'
+        '</div>'
+        f'<a class="device-link" href="/htb/{name}">'
+        'OPEN WORKSPACE →'
+        '</a>'
+        '</div>'
+    )
+
+
 class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
+
+        if self.path.startswith("/htb/"):
+
+            session_name = self.path.split(
+                "/htb/",
+                1,
+            )[1].split(
+                "?",
+                1,
+            )[0]
+
+            session = load_htb_session(
+                session_name
+            )
+
+            if session is None:
+
+                self.send_response(404)
+                self.send_header(
+                    "Content-Type",
+                    "text/html; charset=utf-8",
+                )
+                self.end_headers()
+
+                self.wfile.write(
+                    b"<h1>NEXUS HTB Session Not Found</h1>"
+                )
+
+                return
+
+            findings = session.get(
+                "findings",
+                [],
+            )
+
+            notes = session.get(
+                "notes",
+                [],
+            )
+
+            evidence = session.get(
+                "evidence",
+                [],
+            )
+
+            if not isinstance(findings, list):
+                findings = []
+
+            if not isinstance(notes, list):
+                notes = []
+
+            if not isinstance(evidence, list):
+                evidence = []
+
+            finding_rows = ""
+
+            for finding in findings:
+
+                if not isinstance(
+                    finding,
+                    dict,
+                ):
+                    continue
+
+                category = esc(
+                    finding.get(
+                        "category",
+                        "UNKNOWN",
+                    )
+                )
+
+                content = esc(
+                    finding.get(
+                        "content",
+                        "",
+                    )
+                )
+
+                timestamp = esc(
+                    format_timestamp(
+                        finding.get(
+                            "timestamp"
+                        )
+                    )
+                )
+
+                finding_rows += (
+                    '<div class="htb-detail-row">'
+                    f'<div class="htb-finding-category">'
+                    f'{category}</div>'
+                    f'<div class="htb-finding-content">'
+                    f'{content}</div>'
+                    f'<div class="htb-finding-time">'
+                    f'{timestamp}</div>'
+                    '</div>'
+                )
+
+            note_rows = ""
+
+            for note in notes:
+
+                if not isinstance(
+                    note,
+                    dict,
+                ):
+                    continue
+
+                content = esc(
+                    note.get(
+                        "content",
+                        "",
+                    )
+                )
+
+                timestamp = esc(
+                    format_timestamp(
+                        note.get(
+                            "timestamp"
+                        )
+                    )
+                )
+
+                note_rows += (
+                    '<div class="htb-detail-row">'
+                    f'<div class="htb-finding-content">'
+                    f'{content}</div>'
+                    f'<div class="htb-finding-time">'
+                    f'{timestamp}</div>'
+                    '</div>'
+                )
+
+            if not finding_rows:
+                finding_rows = (
+                    '<div class="muted">'
+                    'No findings recorded'
+                    '</div>'
+                )
+
+            if not note_rows:
+                note_rows = (
+                    '<div class="muted">'
+                    'No notes recorded'
+                    '</div>'
+                )
+
+            research_html = htb_research_html(
+                session,
+                evidence,
+            )
+
+            html_page = f"""<!doctype html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NEXUS HTB · {esc(session.get("name", session_name))}</title>
+
+<style>
+body {{
+    margin: 0;
+    background: #080b10;
+    color: #f5f7fa;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}}
+
+main {{
+    width: min(100% - 24px, 1100px);
+    margin: auto;
+    padding: 24px 0 48px;
+}}
+
+a {{
+    color: #58a6ff;
+    text-decoration: none;
+}}
+
+.card {{
+    margin-top: 14px;
+    background: #11161d;
+    border: 1px solid #222b35;
+    border-radius: 14px;
+    padding: 18px;
+}}
+
+.title {{
+    font-size: 28px;
+    font-weight: 800;
+}}
+
+.subtitle {{
+    margin-top: 4px;
+    color: #7f8a96;
+}}
+
+.metric-grid {{
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}}
+
+.metric {{
+    padding: 12px;
+    background: #0c1117;
+    border: 1px solid #222b35;
+    border-radius: 10px;
+}}
+
+.metric-label {{
+    color: #7f8a96;
+    font-size: 11px;
+    letter-spacing: .08em;
+}}
+
+.metric-value {{
+    margin-top: 4px;
+    font-size: 16px;
+    font-weight: 700;
+    overflow-wrap: anywhere;
+}}
+
+.section-title {{
+    font-size: 18px;
+    font-weight: 800;
+}}
+
+.htb-detail-row {{
+    padding: 12px 0;
+    border-top: 1px solid #222b35;
+}}
+
+.htb-detail-row:first-child {{
+    border-top: 0;
+}}
+
+.htb-finding-category {{
+    color: #58a6ff;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: .08em;
+}}
+
+.htb-finding-content {{
+    margin-top: 4px;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+}}
+
+.htb-finding-time {{
+    margin-top: 4px;
+    color: #7f8a96;
+    font-size: 11px;
+}}
+
+.muted {{
+    color: #7f8a96;
+}}
+
+.htb-research-summary {{
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    margin-top: 12px;
+}}
+
+.htb-research-summary > div {{
+    background: #0c1117;
+    border: 1px solid #222b35;
+    border-radius: 10px;
+    padding: 12px;
+}}
+
+.htb-research-summary strong {{
+    display: block;
+    font-size: 22px;
+}}
+
+.htb-research-summary span {{
+    display: block;
+    color: #7f8a96;
+    font-size: 12px;
+    margin-top: 2px;
+}}
+
+.htb-research-service {{
+    margin-top: 16px;
+    border: 1px solid #222b35;
+    border-radius: 12px;
+    overflow: hidden;
+}}
+
+.htb-service-header {{
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 14px;
+    background: #0c1117;
+    border-bottom: 1px solid #222b35;
+}}
+
+.htb-cve {{
+    padding: 14px;
+    border-top: 1px solid #222b35;
+}}
+
+.htb-cve:first-child {{
+    border-top: 0;
+}}
+
+.htb-cve-header {{
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    align-items: center;
+}}
+
+.htb-cve-title {{
+    font-size: 16px;
+    font-weight: 800;
+}}
+
+.htb-cve-score {{
+    border-radius: 7px;
+    padding: 5px 8px;
+    font-size: 12px;
+    font-weight: 800;
+}}
+
+.htb-status-grid {{
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+    margin-top: 10px;
+}}
+
+.htb-status-grid > div {{
+    background: #0c1117;
+    border: 1px solid #222b35;
+    border-radius: 8px;
+    padding: 9px;
+    overflow-wrap: anywhere;
+}}
+
+.htb-mini-label {{
+    color: #7f8a96;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: .07em;
+    margin-bottom: 4px;
+}}
+
+.htb-subsection {{
+    margin-top: 12px;
+}}
+
+.htb-conditions {{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}}
+
+.htb-condition {{
+    background: #1b2633;
+    border: 1px solid #2d3c4d;
+    border-radius: 7px;
+    padding: 5px 8px;
+    font-size: 12px;
+}}
+
+.htb-condition-summary {{
+    margin-bottom: 8px;
+    color: #c9d1d9;
+    font-size: 12px;
+}}
+
+.htb-condition-list {{
+    display: grid;
+    gap: 6px;
+}}
+
+.htb-condition-row {{
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: #0c1117;
+    border: 1px solid #222b35;
+    border-radius: 8px;
+    padding: 8px 10px;
+}}
+
+.htb-condition-icon {{
+    width: 22px;
+    height: 22px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    font-weight: 900;
+    flex: 0 0 auto;
+}}
+
+.htb-condition-text {{
+    flex: 1;
+    overflow-wrap: anywhere;
+}}
+
+.htb-condition-state {{
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: .04em;
+}}
+
+.htb-condition-icon.verified,
+.htb-condition-state.verified {{
+    color: #3fb950;
+}}
+
+.htb-condition-icon.contradicted,
+.htb-condition-state.contradicted {{
+    color: #f85149;
+}}
+
+.htb-condition-icon.unknown,
+.htb-condition-state.unknown {{
+    color: #d29922;
+}}
+
+.htb-description {{
+    color: #c9d1d9;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}}
+
+.htb-exploit {{
+    padding: 8px 0;
+    border-top: 1px solid #222b35;
+    overflow-wrap: anywhere;
+}}
+
+.htb-exploit:first-child {{
+    border-top: 0;
+}}
+
+.htb-exploit a,
+.htb-links a {{
+    color: #58a6ff;
+    font-weight: 700;
+}}
+
+.htb-links {{
+    margin-top: 12px;
+}}
+
+@media (max-width: 700px) {{
+    .htb-research-summary {{
+        grid-template-columns: 1fr;
+    }}
+
+    .htb-status-grid {{
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }}
+
+    .htb-service-header {{
+        flex-direction: column;
+    }}
+}}
+
+@media (max-width: 600px) {{
+    .metric-grid {{
+        grid-template-columns: 1fr;
+    }}
+}}
+</style>
+</head>
+
+<body>
+<main>
+
+<a href="/">← NEXUS Dashboard</a>
+
+<div class="card">
+    <div class="title">
+        HTB · {esc(session.get("name", session_name))}
+    </div>
+
+    <div class="subtitle">
+        Persistent authorized-lab workspace
+    </div>
+</div>
+
+<div class="card">
+    <div class="metric-grid">
+
+        <div class="metric">
+            <div class="metric-label">TARGET</div>
+            <div class="metric-value">
+                {esc(session.get("target", "Not set") or "Not set")}
+            </div>
+        </div>
+
+        <div class="metric">
+            <div class="metric-label">UPDATED</div>
+            <div class="metric-value">
+                {esc(format_timestamp(session.get("updated_at")))}
+            </div>
+        </div>
+
+        <div class="metric">
+            <div class="metric-label">FINDINGS</div>
+            <div class="metric-value">
+                {len(findings)}
+            </div>
+        </div>
+
+        <div class="metric">
+            <div class="metric-label">NOTES</div>
+            <div class="metric-value">
+                {len(notes)}
+            </div>
+        </div>
+
+    </div>
+</div>
+
+<div class="card">
+    <div class="section-title">NEXUS HTB Operator</div>
+
+    <div style="margin-top:12px;">
+        <textarea
+            id="htbInput"
+            rows="7"
+            placeholder="Ask NEXUS about the target, paste recon output, an error, a service version, or a finding..."
+            style="width:100%;box-sizing:border-box;background:#0c1117;color:#f5f7fa;border:1px solid #222b35;border-radius:10px;padding:12px;font:inherit;"
+        ></textarea>
+    </div>
+
+    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;">
+        <button
+            id="htbAsk"
+            style="padding:10px 14px;border:0;border-radius:9px;background:#238636;color:white;font-weight:700;"
+        >
+            ASK NEXUS
+        </button>
+
+        <button
+            id="htbFinding"
+            style="padding:10px 14px;border:0;border-radius:9px;background:#1f6feb;color:white;font-weight:700;"
+        >
+            SAVE FINDING
+        </button>
+
+        <button
+            id="htbNote"
+            style="padding:10px 14px;border:0;border-radius:9px;background:#6e7681;color:white;font-weight:700;"
+        >
+            SAVE NOTE
+        </button>
+    </div>
+
+    <div
+        id="htbOutput"
+        style="margin-top:14px;white-space:pre-wrap;line-height:1.55;background:#080b10;border:1px solid #222b35;border-radius:10px;padding:14px;min-height:60px;"
+    ></div>
+</div>
+
+<div class="card">
+    <div class="section-title">Vulnerability Research</div>
+
+    <div class="muted" style="margin-top:6px;">
+        Version matching and public exploit references
+        from the persistent HTB research session.
+    </div>
+
+    <div style="margin-top:10px;">
+        {research_html}
+    </div>
+</div>
+
+<div class="card">
+    <div class="section-title">Findings</div>
+    <div>
+        {finding_rows}
+    </div>
+</div>
+
+<div class="card">
+    <div class="section-title">Notes</div>
+    <div>
+        {note_rows}
+    </div>
+</div>
+
+<script>
+const htbSession = {json.dumps(session.get("name", session_name))};
+
+async function htbRequest(action) {{
+    const input = document.getElementById("htbInput");
+    const output = document.getElementById("htbOutput");
+
+    const content = input.value.trim();
+
+    if (!content) {{
+        output.textContent = "Enter something first.";
+        return;
+    }}
+
+    output.textContent = "NEXUS is processing...";
+
+    try {{
+        const response = await fetch(
+            "/api/htb",
+            {{
+                method: "POST",
+                headers: {{
+                    "Content-Type": "application/json"
+                }},
+                body: JSON.stringify(
+                    {{
+                        session: htbSession,
+                        action: action,
+                        content: content,
+                        category: action === "finding"
+                            ? "operator"
+                            : "note"
+                    }}
+                )
+            }}
+        );
+
+        const data = await response.json();
+
+        if (!data.ok) {{
+            throw new Error(
+                data.error || "HTB request failed."
+            );
+        }}
+
+        if (action === "ask") {{
+            output.textContent = data.answer || "No response.";
+        }} else {{
+            output.textContent = data.message || "Saved.";
+
+            input.value = "";
+
+            setTimeout(
+                () => window.location.reload(),
+                500
+            );
+        }}
+
+    }} catch (error) {{
+        output.textContent =
+            "NEXUS HTB error: " + error.message;
+    }}
+}}
+
+document.getElementById("htbAsk").addEventListener(
+    "click",
+    () => htbRequest("ask")
+);
+
+document.getElementById("htbFinding").addEventListener(
+    "click",
+    () => htbRequest("finding")
+);
+
+document.getElementById("htbNote").addEventListener(
+    "click",
+    () => htbRequest("note")
+);
+
+document.getElementById("htbInput").addEventListener(
+    "keydown",
+    (event) => {{
+        if (
+            event.key === "Enter"
+            && (event.ctrlKey || event.metaKey)
+        ) {{
+            event.preventDefault();
+            htbRequest("ask");
+        }}
+    }}
+);
+</script>
+
+</main>
+</body>
+</html>
+"""
+
+            body = html_page.encode()
+
+            self.send_response(200)
+
+            self.send_header(
+                "Content-Type",
+                "text/html; charset=utf-8",
+            )
+
+            self.send_header(
+                "Content-Length",
+                str(len(body)),
+            )
+
+            self.end_headers()
+
+            self.wfile.write(
+                body
+            )
+
+            return
 
         if self.path == "/events":
 
@@ -705,6 +2258,32 @@ a {{
 .muted {{
     color: #7f8a96;
     font-size: 13px;
+}}
+
+.htb-row {{
+    padding: 14px 0;
+    border-top: 1px solid #222b35;
+}}
+
+.htb-row:first-child {{
+    border-top: 0;
+}}
+
+.htb-title {{
+    font-size: 16px;
+    font-weight: 800;
+}}
+
+.htb-target {{
+    margin-top: 4px;
+    color: #aab4bf;
+    font-size: 13px;
+}}
+
+.htb-meta {{
+    margin-top: 4px;
+    color: #7f8a96;
+    font-size: 11px;
 }}
 
 .high {{
@@ -2228,6 +3807,20 @@ h1 {{
         if not isinstance(events_data, list):
             events_data = []
 
+        htb_sessions = load_htb_sessions()
+
+        htb_rows = "".join(
+            htb_session_row(session)
+            for session in htb_sessions
+        )
+
+        if not htb_rows:
+            htb_rows = (
+                '<div class="muted">'
+                'No HTB sessions'
+                '</div>'
+            )
+
         device_rows = "".join(
             device_row(device)
             for device in devices_data
@@ -2914,6 +4507,20 @@ main {{
 </section>
 
 <section class="card section">
+    <div class="label">HTB LAB</div>
+
+    <div style="margin-top:8px;">
+        <div style="color:#7f8a96;font-size:13px;">
+            Persistent authorized-lab sessions
+        </div>
+    </div>
+
+    <div style="margin-top:10px;">
+        {htb_rows}
+    </div>
+</section>
+
+<section class="card section">
     <div class="label">Tracked Devices</div>
     <div>
         {device_rows}
@@ -2966,6 +4573,272 @@ main {{
         self.end_headers()
 
         self.wfile.write(body)
+
+    def do_POST(self):
+
+        if self.path != "/api/htb":
+
+            self.send_response(404)
+            self.end_headers()
+            return
+
+        try:
+
+            length = int(
+                self.headers.get(
+                    "Content-Length",
+                    "0",
+                )
+            )
+
+            raw_body = self.rfile.read(
+                length
+            )
+
+            payload = json.loads(
+                raw_body.decode(
+                    "utf-8"
+                )
+            )
+
+            if not isinstance(
+                payload,
+                dict,
+            ):
+                raise ValueError(
+                    "Request body must be a JSON object."
+                )
+
+            session_name = str(
+                payload.get(
+                    "session",
+                    "",
+                )
+            )
+
+            action = str(
+                payload.get(
+                    "action",
+                    "",
+                )
+            )
+
+            content = str(
+                payload.get(
+                    "content",
+                    "",
+                )
+            ).strip()
+
+            if not session_name:
+                raise ValueError(
+                    "Missing HTB session name."
+                )
+
+            safe_name = Path(
+                session_name
+            ).name
+
+            if safe_name != session_name:
+                raise ValueError(
+                    "Invalid HTB session name."
+                )
+
+            session_path = (
+                HTB_SESSION_DIR
+                / f"{safe_name}.json"
+            )
+
+            if not session_path.exists():
+                raise ValueError(
+                    "HTB session not found."
+                )
+
+            with session_path.open(
+                "r",
+                encoding="utf-8",
+            ) as file:
+
+                session = json.load(
+                    file
+                )
+
+            if not isinstance(
+                session,
+                dict,
+            ):
+                raise ValueError(
+                    "HTB session is invalid."
+                )
+
+            session.setdefault(
+                "findings",
+                [],
+            )
+
+            session.setdefault(
+                "notes",
+                [],
+            )
+
+            now = datetime.now(
+                timezone.utc
+            ).isoformat()
+
+            if action == "finding":
+
+                if not content:
+                    raise ValueError(
+                        "Finding cannot be empty."
+                    )
+
+                category = str(
+                    payload.get(
+                        "category",
+                        "operator",
+                    )
+                ).strip() or "operator"
+
+                session["findings"].append(
+                    {
+                        "timestamp": now,
+                        "category": category,
+                        "content": content,
+                    }
+                )
+
+                session["updated_at"] = now
+
+                save_htb_session(
+                    session
+                )
+
+                response = {
+                    "ok": True,
+                    "action": "finding",
+                    "message": "Finding saved.",
+                }
+
+            elif action == "note":
+
+                if not content:
+                    raise ValueError(
+                        "Note cannot be empty."
+                    )
+
+                session["notes"].append(
+                    {
+                        "timestamp": now,
+                        "content": content,
+                    }
+                )
+
+                session["updated_at"] = now
+
+                save_htb_session(
+                    session
+                )
+
+                response = {
+                    "ok": True,
+                    "action": "note",
+                    "message": "Note saved.",
+                }
+
+            elif action == "ask":
+
+                if not content:
+                    raise ValueError(
+                        "Question cannot be empty."
+                    )
+
+                # Persist the operator's question as context.
+                session["findings"].append(
+                    {
+                        "timestamp": now,
+                        "category": "operator_question",
+                        "content": content,
+                    }
+                )
+
+                session["updated_at"] = now
+
+                save_htb_session(
+                    session
+                )
+
+                answer = call_ollama(
+                    htb_prompt(
+                        session,
+                        content,
+                    )
+                )
+
+                response = {
+                    "ok": True,
+                    "action": "ask",
+                    "answer": answer,
+                }
+
+            else:
+
+                raise ValueError(
+                    "Unknown HTB action."
+                )
+
+            body = json.dumps(
+                response
+            ).encode(
+                "utf-8"
+            )
+
+            self.send_response(200)
+
+            self.send_header(
+                "Content-Type",
+                "application/json; charset=utf-8",
+            )
+
+            self.send_header(
+                "Content-Length",
+                str(len(body)),
+            )
+
+            self.end_headers()
+
+            self.wfile.write(
+                body
+            )
+
+        except Exception as error:
+
+            body = json.dumps(
+                {
+                    "ok": False,
+                    "error": str(error),
+                }
+            ).encode(
+                "utf-8"
+            )
+
+            self.send_response(400)
+
+            self.send_header(
+                "Content-Type",
+                "application/json; charset=utf-8",
+            )
+
+            self.send_header(
+                "Content-Length",
+                str(len(body)),
+            )
+
+            self.end_headers()
+
+            self.wfile.write(
+                body
+            )
+
 
     def log_message(self, *args):
         return

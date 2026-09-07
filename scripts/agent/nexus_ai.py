@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 
 import json
+import os
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
@@ -9,37 +11,39 @@ from pathlib import Path
 
 NEXUS = Path.home() / "nexus"
 
+INTELLIGENCE_DIR = Path(
+    os.environ.get(
+        "NEXUS_INTELLIGENCE_DIR",
+        str(
+            NEXUS
+            / "monitoring"
+            / "intelligence"
+        ),
+    )
+)
+
 INTELLIGENCE_CURRENT = (
-    NEXUS
-    / "monitoring"
-    / "intelligence"
+    INTELLIGENCE_DIR
     / "current.json"
 )
 
 AI_OUTPUT = (
-    NEXUS
-    / "monitoring"
-    / "intelligence"
+    INTELLIGENCE_DIR
     / "ai_result.json"
 )
 
 AI_TRIGGER_STATE = (
-    NEXUS
-    / "monitoring"
-    / "intelligence"
+    INTELLIGENCE_DIR
     / "ai_trigger_state.json"
 )
 
 AI_HISTORY = (
-    NEXUS
-    / "monitoring"
-    / "intelligence"
+    INTELLIGENCE_DIR
     / "ai_history.jsonl"
 )
+
 AI_VALIDATION_STATE = (
-    NEXUS
-    / "monitoring"
-    / "intelligence"
+    INTELLIGENCE_DIR
     / "ai_validation_state.json"
 )
 
@@ -48,7 +52,7 @@ AI_COOLDOWN_SECONDS = 300
 AI_STALE_SECONDS = 1800
 
 OLLAMA_URL = (
-    "http://127.0.0.1:11434/api/generate"
+    "http://127.0.0.1:11434/api/chat"
 )
 
 MODEL = "qwen3:1.7b"
@@ -550,31 +554,38 @@ Rules:
 6. When evidence_status is UNDETERMINED, describe observed behavior
    without assigning a cause.
 7. When evidence_status is UNDETERMINED, recommended_action must
-   focus on neutral monitoring, validation, evidence collection,
+   focus only on neutral monitoring, validation, evidence collection,
    or configuration/state checking.
-8. Never recommend destructive or disruptive actions.
-9. Do not execute commands or directly modify the network.
-10. Keep the response concise and technically precise.
+8. For UNDETERMINED results, preferred action language includes:
+   "monitor for recurrence", "validate the observed state",
+   "collect additional evidence", "review current configuration",
+   and "check device or port state".
+9. For UNDETERMINED results, do not use security-incident language
+   such as "unauthorized access", "intrusion", "attack", "compromise",
+   "spoofing", or "malware" in any field.
+10. Never recommend destructive or disruptive actions.
+11. Do not execute commands or directly modify the network.
+12. Keep the response concise and technically precise.
 
 AUTHORITATIVE METRIC RULES:
 
-11. Structured NEXUS metrics are authoritative.
-12. Numeric metrics must not be contradicted or reinterpreted.
-13. Zero-valued metrics are explicit observations, not missing data.
-14. mac_added and mac_removed describe MAC-address observations.
-15. identity_changes is a separate metric from MAC-address changes.
-16. port_changes is a separate metric from MAC-address changes.
-17. If identity_changes is 0, no identity changes were observed.
-18. If port_changes is 0, no port changes were observed.
-19. If mac_added is greater than 0, MAC-address additions were observed.
-20. If mac_removed is greater than 0, MAC-address removals were observed.
-21. Do not infer identity_changes from mac_added or mac_removed.
-22. Do not infer port_changes when port_changes is 0.
-23. An assessment label is descriptive and does not override its metrics.
-24. The phrase "network identity churn" does not by itself mean
+13. Structured NEXUS metrics are authoritative.
+14. Numeric metrics must not be contradicted or reinterpreted.
+15. Zero-valued metrics are explicit observations, not missing data.
+16. mac_added and mac_removed describe MAC-address observations.
+17. identity_changes is a separate metric from MAC-address changes.
+18. port_changes is a separate metric from MAC-address changes.
+19. If identity_changes is 0, no identity changes were observed.
+20. If port_changes is 0, no port changes were observed.
+21. If mac_added is greater than 0, MAC-address additions were observed.
+22. If mac_removed is greater than 0, MAC-address removals were observed.
+23. Do not infer identity_changes from mac_added or mac_removed.
+24. Do not infer port_changes when port_changes is 0.
+25. An assessment label is descriptive and does not override its metrics.
+26. The phrase "network identity churn" does not by itself mean
     identity_changes occurred.
-25. Do not describe a device as unknown when NEXUS identifies it.
-26. Do not introduce a new explanation that is unsupported by the
+27. Do not describe a device as unknown when NEXUS identifies it.
+28. Do not introduce a new explanation that is unsupported by the
     supplied structured evidence.
 
 INTERPRETATION RULES:
@@ -596,6 +607,27 @@ def call_ollama(prompt):
     Ollama chat API.
     """
 
+    parsed_url = urllib.parse.urlparse(
+        OLLAMA_URL
+    )
+
+    allowed_hosts = {
+        "127.0.0.1",
+        "localhost",
+        "::1",
+    }
+
+    if (
+        parsed_url.scheme != "http"
+        or parsed_url.hostname not in allowed_hosts
+        or parsed_url.port != 11434
+        or parsed_url.path != "/api/chat"
+    ):
+        raise RuntimeError(
+            "NEXUS AI refused a non-local Ollama endpoint: "
+            + OLLAMA_URL
+        )
+
     payload = {
         "model": MODEL,
         "messages": [
@@ -613,7 +645,7 @@ def call_ollama(prompt):
     }
 
     request = urllib.request.Request(
-        "http://127.0.0.1:11434/api/chat",
+        OLLAMA_URL,
         data=json.dumps(
             payload
         ).encode("utf-8"),

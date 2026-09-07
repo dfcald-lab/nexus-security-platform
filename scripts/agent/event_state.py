@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -9,11 +10,16 @@ from pathlib import Path
 # NEXUS EVENT STATE
 # ============================================================
 
-EVENT_DIR = (
-    Path.home()
-    / "nexus"
-    / "monitoring"
-    / "events"
+EVENT_DIR = Path(
+    os.environ.get(
+        "NEXUS_EVENT_DIR",
+        str(
+            Path.home()
+            / "nexus"
+            / "monitoring"
+            / "events"
+        ),
+    )
 )
 
 EVENT_LOG = EVENT_DIR / "events.jsonl"
@@ -280,9 +286,27 @@ def reconcile(events, state):
             resolved_now,
         )
 
+    # Recovery records describe a condition returning to
+    # NORMAL. They remain in events.jsonl as historical
+    # evidence, but are not themselves active conditions.
+    state_events = [
+        event
+        for event in events
+        if not (
+            event.get("event_type") == "system_health"
+            and event.get("message", "").startswith(
+                "Thermal state changed on "
+            )
+            and " -> NORMAL " in event.get(
+                "message",
+                "",
+            )
+        )
+    ]
+
     current_keys = {
         event_key(event)
-        for event in events
+        for event in state_events
     }
 
     # --------------------------------------------------------
@@ -431,6 +455,86 @@ def reconcile(events, state):
                     resolved_now.add(
                         key
                     )
+
+    # --------------------------------------------------------
+    # Thermal recovery resolution.
+    #
+    # A thermal transition back to NORMAL resolves the
+    # corresponding earlier non-NORMAL thermal condition for
+    # the same sensor.
+    #
+    # Example:
+    #
+    # Thermal state changed on GPU: NORMAL -> HIGH
+    # Thermal state changed on GPU: HIGH -> NORMAL
+    #
+    # The recovery event remains in the event log as historical
+    # evidence, while the earlier HIGH event leaves active state.
+    # --------------------------------------------------------
+
+    for event in events:
+
+        current_message = event.get(
+            "message",
+            "",
+        )
+
+        if not current_message.startswith(
+            "Thermal state changed on "
+        ):
+            continue
+
+        if " -> NORMAL " not in current_message:
+            continue
+
+        prefix = (
+            "Thermal state changed on "
+        )
+
+        remainder = current_message[
+            len(prefix):
+        ]
+
+        if ":" not in remainder:
+            continue
+
+        sensor, transition = remainder.split(
+            ":",
+            1,
+        )
+
+        sensor = sensor.strip().lower()
+        transition = transition.strip()
+
+        if " -> NORMAL " not in transition:
+            continue
+
+        previous_state = transition.split(
+            " -> NORMAL ",
+            1,
+        )[0].strip()
+
+        if previous_state == "UNKNOWN":
+            continue
+
+        for key in active_keys:
+
+            severity, score, message = parse_key(
+                key
+            )
+
+            expected_prefix = (
+                "Thermal state changed on "
+                f"{sensor.upper()}: "
+            )
+
+            if not message.startswith(
+                expected_prefix
+            ):
+                continue
+
+            if f" -> {previous_state} " in message:
+                resolved_now.add(key)
 
     # --------------------------------------------------------
     # Build next active state.

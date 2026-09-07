@@ -1,7 +1,15 @@
 #!/usr/bin/env python3
 
 import json
+import os
 from pathlib import Path
+
+from scripts.agent.publish_jetson_state import (
+    incident_id,
+    parse_event,
+    is_thermal_event,
+    thermal_sensor,
+)
 
 
 # ============================================================
@@ -10,10 +18,15 @@ from pathlib import Path
 
 NEXUS = Path.home() / "nexus"
 
-EVENT_DIR = (
-    NEXUS
-    / "monitoring"
-    / "events"
+EVENT_DIR = Path(
+    os.environ.get(
+        "NEXUS_EVENT_DIR",
+        str(
+            NEXUS
+            / "monitoring"
+            / "events"
+        ),
+    )
 )
 
 STATE_FILE = EVENT_DIR / "event_state.json"
@@ -209,39 +222,84 @@ def process_active_events(
         [],
     )
 
-    alerted_events = set(
-        alert_state.get(
-            "alerted_events",
-            [],
-        )
+    if not isinstance(active_events, list):
+        active_events = []
+
+    if not isinstance(resolved_events, list):
+        resolved_events = []
+
+    previous_alerted = alert_state.get(
+        "alerted_events",
+        [],
     )
 
-    active_keys = set(
-        active_events
-    )
-
-    resolved_keys = set(
-        resolved_events
-    )
+    if not isinstance(previous_alerted, list):
+        previous_alerted = []
 
     # --------------------------------------------------------
-    # Remove resolved events from the alert tracking set.
+    # Alert tracking now uses canonical incident IDs instead
+    # of raw event keys.
     #
-    # This allows an event to generate a fresh alert if it
-    # disappears, resolves, and later returns.
+    # This means:
+    #
+    #   GPU thermal event ─┐
+    #                      ├──> INC-XXXXXXXX
+    #   TJ thermal event ──┘
+    #
+    # produces one alert.
+    #
+    # Existing raw keys are converted automatically so the
+    # change does not require deleting alert_state.json.
     # --------------------------------------------------------
 
-    alerted_events.intersection_update(
-        active_keys
+    alerted_incidents = set()
+
+    for value in previous_alerted:
+
+        if not isinstance(value, str):
+            continue
+
+        if value.startswith("INC-"):
+            alerted_incidents.add(value)
+            continue
+
+        event = parse_event_key(value)
+
+        if event is None:
+            continue
+
+        if is_actionable(event):
+            alerted_incidents.add(
+                incident_id(event)
+            )
+
+    # --------------------------------------------------------
+    # Resolved incidents are removed from alert tracking.
+    # This allows a future re-occurrence to alert again.
+    # --------------------------------------------------------
+
+    resolved_incidents = set()
+
+    for key in resolved_events:
+
+        event = parse_event_key(key)
+
+        if event is None:
+            continue
+
+        resolved_incidents.add(
+            incident_id(event)
+        )
+
+    alerted_incidents.difference_update(
+        resolved_incidents
     )
 
     # --------------------------------------------------------
-    # Find actionable active events.
+    # Group active actionable events by canonical incident ID.
     # --------------------------------------------------------
 
-    new_alerts = []
-
-    current_actionable = set()
+    groups = {}
 
     for key in active_events:
 
@@ -253,27 +311,108 @@ def process_active_events(
         if not is_actionable(event):
             continue
 
-        current_actionable.add(key)
+        identifier = incident_id(event)
 
-        if key in alerted_events:
+        groups.setdefault(
+            identifier,
+            [],
+        ).append(event)
+
+    # --------------------------------------------------------
+    # Build exactly one alert per incident.
+    # --------------------------------------------------------
+
+    new_alerts = []
+
+    for identifier, group in groups.items():
+
+        primary = max(
+            group,
+            key=lambda event: (
+                {
+                    "INFO": 0,
+                    "MEDIUM": 1,
+                    "HIGH": 2,
+                    "CRITICAL": 3,
+                }.get(
+                    event.get(
+                        "severity",
+                        "INFO",
+                    ),
+                    0,
+                ),
+                event.get(
+                    "score",
+                    0,
+                ),
+            ),
+        )
+
+        alert = dict(primary)
+
+        alert["incident_id"] = identifier
+
+        # ----------------------------------------------------
+        # Thermal incidents become one human-readable alert
+        # while preserving the individual sensor evidence.
+        # ----------------------------------------------------
+
+        thermal_events = [
+            event
+            for event in group
+            if is_thermal_event(event)
+        ]
+
+        if thermal_events:
+
+            sensors = sorted(
+                {
+                    thermal_sensor(event)
+                    for event in thermal_events
+                }
+            )
+
+            alert["message"] = (
+                "Thermal incident affecting: "
+                + ", ".join(sensors)
+            )
+
+            alert["contributors"] = [
+                {
+                    "sensor": thermal_sensor(event),
+                    "severity": event.get(
+                        "severity",
+                        "INFO",
+                    ),
+                    "score": event.get(
+                        "score",
+                        0,
+                    ),
+                    "message": event.get(
+                        "message",
+                        "",
+                    ),
+                }
+                for event in sorted(
+                    thermal_events,
+                    key=lambda event:
+                        thermal_sensor(event),
+                )
+            ]
+
+        if identifier in alerted_incidents:
             continue
 
         new_alerts.append(
-            event
+            alert
         )
 
-    # --------------------------------------------------------
-    # Mark newly alerted events.
-    # --------------------------------------------------------
-
-    for event in new_alerts:
-
-        alerted_events.add(
-            event["key"]
+        alerted_incidents.add(
+            identifier
         )
 
     alert_state["alerted_events"] = sorted(
-        alerted_events
+        alerted_incidents
     )
 
     return new_alerts

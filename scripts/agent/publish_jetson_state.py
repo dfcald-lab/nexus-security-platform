@@ -2,6 +2,8 @@
 
 import hashlib
 import json
+import os
+import re
 import subprocess
 import tempfile
 from datetime import datetime, timezone
@@ -10,43 +12,72 @@ from scripts.agent.event_classifier import classify_event
 
 NEXUS = Path.home() / "nexus"
 
-EVENT_STATE = (
-    NEXUS
-    / "monitoring"
-    / "events"
-    / "event_state.json"
+EVENT_STATE = Path(
+    os.environ.get(
+        "NEXUS_EVENT_STATE",
+        str(
+            NEXUS
+            / "monitoring"
+            / "events"
+            / "event_state.json"
+        ),
+    )
 )
 
-EVENT_LOG = (
-    NEXUS
-    / "monitoring"
-    / "events"
-    / "events.jsonl"
+EVENT_LOG = Path(
+    os.environ.get(
+        "NEXUS_EVENT_LOG",
+        str(
+            NEXUS
+            / "monitoring"
+            / "events"
+            / "events.jsonl"
+        ),
+    )
 )
 
-INCIDENT_HISTORY = (
-    NEXUS
-    / "monitoring"
-    / "events"
-    / "incident_history.json"
+INCIDENT_HISTORY = Path(
+    os.environ.get(
+        "NEXUS_INCIDENT_HISTORY",
+        str(
+            NEXUS
+            / "monitoring"
+            / "events"
+            / "incident_history.json"
+        ),
+    )
 )
 
-DEVICE_HISTORY = (
-    NEXUS
-    / "monitoring"
-    / "devices"
-    / "device_history.json"
+DEVICE_HISTORY = Path(
+    os.environ.get(
+        "NEXUS_DEVICE_HISTORY",
+        str(
+            NEXUS
+            / "monitoring"
+            / "devices"
+            / "device_history.json"
+        ),
+    )
 )
 
-TOPOLOGY = (
-    NEXUS
-    / "monitoring"
-    / "topology"
-    / "current.json"
+TOPOLOGY = Path(
+    os.environ.get(
+        "NEXUS_TOPOLOGY",
+        str(
+            NEXUS
+            / "monitoring"
+            / "topology"
+            / "current.json"
+        ),
+    )
+)
+
+STATE_OUTPUT = os.environ.get(
+    "NEXUS_STATE_OUTPUT"
 )
 
 JETSON_USER = "jetson"
-JETSON_HOST = "192.0.2.26"
+JETSON_HOST = os.environ.get("NEXUS_JETSON_HOST", "127.0.0.1")
 SSH_KEY = Path.home() / ".ssh" / "nexus_jetson"
 
 REMOTE_DIR = "/home/jetson/nexus/hardware"
@@ -113,7 +144,43 @@ def parse_event(key):
         "classification": classification,
     }
 
+def is_thermal_event(event):
+    message = str(
+        event.get("message", "")
+    )
+
+    return message.startswith(
+        "Thermal state changed on "
+    )
+
+
+def thermal_sensor(event):
+    message = str(
+        event.get("message", "")
+    )
+
+    match = re.search(
+        r"Thermal state changed on ([A-Za-z0-9_-]+):",
+        message,
+        re.IGNORECASE,
+    )
+
+    if match:
+        return match.group(1).lower()
+
+    return "unknown"
+
+
 def incident_id(event):
+    if is_thermal_event(event):
+        raw = "NEXUS|THERMAL|SYSTEM_HEALTH"
+
+        digest = hashlib.sha256(
+            raw.encode("utf-8")
+        ).hexdigest()[:8].upper()
+
+        return f"INC-{digest}"
+
     raw = (
         f"{event.get('severity', 'INFO')}"
         f"|{event.get('score', 0)}"
@@ -251,17 +318,136 @@ def build_incident_history(
 
     now = iso_now()
 
-    active_ids = set()
+    def group_events(events):
+        groups = {}
 
-    for key in active_events:
+        for key in events:
+            parsed = parse_event(key)
 
-        parsed = parse_event(key)
+            identifier = incident_id(
+                parsed
+            )
 
-        identifier = incident_id(
+            groups.setdefault(
+                identifier,
+                [],
+            ).append(
+                (
+                    key,
+                    parsed,
+                )
+            )
+
+        return groups
+
+    def aggregate(identifier, entries):
+        parsed_events = [
             parsed
+            for _, parsed in entries
+        ]
+
+        highest = max(
+            parsed_events,
+            key=lambda event: (
+                SEVERITY_ORDER.get(
+                    event.get("severity", "INFO"),
+                    0,
+                ),
+                event.get("score", 0),
+            ),
         )
 
-        active_ids.add(identifier)
+        timestamps = [
+            event_timestamps.get(key)
+            for key, _ in entries
+            if event_timestamps.get(key)
+        ]
+
+        if timestamps:
+            detected_at = min(timestamps)
+            last_detected_at = max(timestamps)
+        else:
+            detected_at = now
+            last_detected_at = now
+
+        summary = {
+            "severity": highest.get(
+                "severity",
+                "INFO",
+            ),
+            "score": highest.get(
+                "score",
+                0,
+            ),
+            "message": highest.get(
+                "message",
+                "",
+            ),
+            "detected_at": detected_at,
+            "last_detected_at": last_detected_at,
+        }
+
+        if any(
+            is_thermal_event(event)
+            for event in parsed_events
+        ):
+            sensors = sorted(
+                {
+                    thermal_sensor(event)
+                    for event in parsed_events
+                }
+            )
+
+            summary["message"] = (
+                "Thermal incident affecting: "
+                + ", ".join(sensors)
+            )
+
+            summary["contributors"] = [
+                {
+                    "sensor": thermal_sensor(event),
+                    "severity": event.get(
+                        "severity",
+                        "INFO",
+                    ),
+                    "score": event.get(
+                        "score",
+                        0,
+                    ),
+                    "message": event.get(
+                        "message",
+                        "",
+                    ),
+                }
+                for event in sorted(
+                    parsed_events,
+                    key=lambda event:
+                        thermal_sensor(event),
+                )
+            ]
+
+        return summary
+
+    active_groups = group_events(
+        active_events
+    )
+
+    resolved_groups = group_events(
+        resolved_events
+    )
+
+    active_ids = set()
+
+    for identifier, entries in active_groups.items():
+
+        summary = aggregate(
+            identifier,
+            entries,
+        )
+
+        active_ids.add(
+            identifier
+        )
 
         record = incidents.get(
             identifier
@@ -271,17 +457,11 @@ def build_incident_history(
 
             record = {
                 "incident_id": identifier,
-                "severity": parsed["severity"],
-                "score": parsed["score"],
-                "message": parsed["message"],
-                "detected_at": (
-                    event_timestamps.get(key)
-                    or now
-                ),
-                "last_detected_at": (
-                    event_timestamps.get(key)
-                    or now
-                ),
+                "severity": summary["severity"],
+                "score": summary["score"],
+                "message": summary["message"],
+                "detected_at": summary["detected_at"],
+                "last_detected_at": summary["last_detected_at"],
                 "resolved_at": None,
                 "duration_seconds": None,
                 "activation_count": 1,
@@ -296,21 +476,20 @@ def build_incident_history(
                 == "RESOLVED"
             )
 
-            record["severity"] = parsed[
+            record["severity"] = summary[
                 "severity"
             ]
 
-            record["score"] = parsed[
+            record["score"] = summary[
                 "score"
             ]
 
-            record["message"] = parsed[
+            record["message"] = summary[
                 "message"
             ]
 
             record["last_detected_at"] = (
-                event_timestamps.get(key)
-                or now
+                summary["last_detected_at"]
             )
 
             if was_resolved:
@@ -329,14 +508,26 @@ def build_incident_history(
             record["duration_seconds"] = None
             record["resolution_status"] = None
 
+        if "contributors" in summary:
+            record["contributors"] = (
+                summary["contributors"]
+            )
+        else:
+            record.pop(
+                "contributors",
+                None,
+            )
+
         incidents[identifier] = record
 
-    for key in resolved_events:
+    for identifier, entries in resolved_groups.items():
 
-        parsed = parse_event(key)
+        if identifier in active_ids:
+            continue
 
-        identifier = incident_id(
-            parsed
+        summary = aggregate(
+            identifier,
+            entries,
         )
 
         record = incidents.get(
@@ -345,17 +536,13 @@ def build_incident_history(
 
         if not isinstance(record, dict):
 
-            incidents[identifier] = {
+            record = {
                 "incident_id": identifier,
-                "severity": parsed["severity"],
-                "score": parsed["score"],
-                "message": parsed["message"],
-                "detected_at": (
-                    event_timestamps.get(key)
-                ),
-                "last_detected_at": (
-                    event_timestamps.get(key)
-                ),
+                "severity": summary["severity"],
+                "score": summary["score"],
+                "message": summary["message"],
+                "detected_at": summary["detected_at"],
+                "last_detected_at": summary["last_detected_at"],
                 "resolved_at": None,
                 "duration_seconds": None,
                 "activation_count": 1,
@@ -365,49 +552,51 @@ def build_incident_history(
                 ),
             }
 
-            continue
+        else:
 
-        if identifier in active_ids:
-            continue
+            record["severity"] = summary[
+                "severity"
+            ]
 
-        record["severity"] = parsed[
-            "severity"
-        ]
+            record["score"] = summary[
+                "score"
+            ]
 
-        record["score"] = parsed[
-            "score"
-        ]
+            record["message"] = summary[
+                "message"
+            ]
 
-        record["message"] = parsed[
-            "message"
-        ]
+            if record.get("state") == "ACTIVE":
 
-        if record.get("state") == "ACTIVE":
+                record["resolved_at"] = now
 
-            record["resolved_at"] = now
-
-            record["duration_seconds"] = (
-                duration_seconds(
-                    record.get(
-                        "detected_at"
-                    ),
-                    now,
+                record["duration_seconds"] = (
+                    duration_seconds(
+                        record.get(
+                            "detected_at"
+                        ),
+                        now,
+                    )
                 )
+
+                record["resolution_status"] = (
+                    "OBSERVED"
+                )
+
+            elif not record.get(
+                "resolved_at"
+            ):
+
+                record["resolution_status"] = (
+                    "HISTORICAL_UNKNOWN"
+                )
+
+            record["state"] = "RESOLVED"
+
+        if "contributors" in summary:
+            record["contributors"] = (
+                summary["contributors"]
             )
-
-            record["resolution_status"] = (
-                "OBSERVED"
-            )
-
-        elif not record.get(
-            "resolved_at"
-        ):
-
-            record["resolution_status"] = (
-                "HISTORICAL_UNKNOWN"
-            )
-
-        record["state"] = "RESOLVED"
 
         incidents[identifier] = record
 
@@ -426,7 +615,6 @@ def build_incident_history(
         file.write("\n")
 
     return incidents
-
 
 def build_state():
 
@@ -456,25 +644,83 @@ def build_state():
         [],
     )
 
-    parsed = [
-        parse_event(event)
-        for event in active_events
-    ]
+    if not isinstance(active_events, list):
+        active_events = []
 
-    parsed.sort(
+    event_timestamps = load_event_timestamps()
+
+    incident_history = build_incident_history(
+        event_state,
+        event_timestamps,
+    )
+
+    active_groups_for_state = {}
+
+    for event in active_events:
+
+        parsed_event = parse_event(event)
+
+        identifier = incident_id(
+            parsed_event
+        )
+
+        active_groups_for_state.setdefault(
+            identifier,
+            [],
+        ).append(parsed_event)
+
+    active_for_state = []
+
+    for identifier, group in active_groups_for_state.items():
+
+        lifecycle = incident_history.get(
+            identifier,
+            {},
+        )
+
+        primary = max(
+            group,
+            key=lambda event: (
+                SEVERITY_ORDER.get(
+                    event.get("severity", "INFO"),
+                    0,
+                ),
+                event.get("score", 0),
+            ),
+        )
+
+        state_event = dict(primary)
+
+        if lifecycle.get("message"):
+            state_event["message"] = lifecycle[
+                "message"
+            ]
+
+        if lifecycle.get("contributors"):
+            state_event["contributors"] = (
+                lifecycle["contributors"]
+            )
+
+        state_event["incident_id"] = identifier
+
+        active_for_state.append(
+            state_event
+        )
+
+    active_for_state.sort(
         key=lambda event: (
             SEVERITY_ORDER.get(
-                event["severity"],
+                event.get("severity", "INFO"),
                 0,
             ),
-            event["score"],
+            event.get("score", 0),
         ),
         reverse=True,
     )
 
     actionable = [
         event
-        for event in parsed
+        for event in active_for_state
         if event.get("classification") != "NORMAL"
     ]
 
@@ -493,7 +739,7 @@ def build_state():
         top_event = "NO ALERT"
 
     active_count = len(
-        active_events
+        active_for_state
     )
 
     actionable_count = len(
@@ -751,16 +997,38 @@ def build_state():
         event_timestamps,
     )
 
-    parsed_active_events = []
+    active_groups = {}
 
     for event in active_events:
         parsed = parse_event(event)
         identifier = incident_id(parsed)
 
+        active_groups.setdefault(
+            identifier,
+            [],
+        ).append(parsed)
+
+    parsed_active_events = []
+
+    for identifier, group in active_groups.items():
+
         lifecycle = incident_history.get(
             identifier,
             {},
         )
+
+        primary = max(
+            group,
+            key=lambda event: (
+                SEVERITY_ORDER.get(
+                    event.get("severity", "INFO"),
+                    0,
+                ),
+                event.get("score", 0),
+            ),
+        )
+
+        parsed = dict(primary)
 
         parsed["incident_id"] = identifier
         parsed["state"] = "ACTIVE"
@@ -780,6 +1048,16 @@ def build_state():
             "activation_count",
             1,
         )
+
+        if lifecycle.get("contributors"):
+            parsed["message"] = lifecycle.get(
+                "message",
+                parsed["message"],
+            )
+
+            parsed["contributors"] = (
+                lifecycle["contributors"]
+            )
 
         parsed_active_events.append(parsed)
 
@@ -916,6 +1194,29 @@ def build_state():
 
 
 def publish(state):
+
+    if STATE_OUTPUT:
+
+        output_path = Path(
+            STATE_OUTPUT
+        )
+
+        output_path.parent.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
+        with output_path.open("w") as file:
+
+            json.dump(
+                state,
+                file,
+                indent=2,
+            )
+
+            file.write("\n")
+
+        return
 
     with tempfile.NamedTemporaryFile(
         mode="w",

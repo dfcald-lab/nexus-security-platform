@@ -5,6 +5,7 @@ import os
 import sys
 import time
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 
 import psutil
@@ -32,6 +33,13 @@ HEALTH_FILE = (
     / "nexus"
     / "hardware"
     / "health.json"
+)
+
+TELEMETRY_FILE = (
+    Path.home()
+    / "nexus"
+    / "hardware"
+    / "telemetry.json"
 )
 
 
@@ -199,6 +207,181 @@ def write_hardware_health(
         )
         + "\n"
     )
+
+
+def read_thermal_zones():
+    """
+    Read Jetson kernel thermal zones directly.
+
+    Temperatures are exposed by the Linux thermal framework
+    in thousandths of a degree Celsius.
+    """
+
+    temperatures = {}
+
+    thermal_root = Path(
+        "/sys/devices/virtual/thermal"
+    )
+
+    for zone in sorted(
+        thermal_root.glob("thermal_zone*")
+    ):
+
+        type_file = zone / "type"
+        temp_file = zone / "temp"
+
+        try:
+            sensor_name = (
+                type_file.read_text(
+                    encoding="utf-8"
+                ).strip()
+            )
+
+            raw_temp = int(
+                temp_file.read_text(
+                    encoding="utf-8"
+                ).strip()
+            )
+
+            temperatures[sensor_name] = (
+                raw_temp / 1000.0
+            )
+
+        except Exception as error:
+            print(
+                f"TELEMETRY: skipping unreadable thermal zone "
+                f"{zone.name}: {error}",
+                flush=True,
+            )
+            continue
+
+    return temperatures
+
+
+THERMAL_THRESHOLDS_C = {
+    "elevated": 70.0,
+    "high": 80.0,
+    "critical": 90.0,
+}
+
+
+def classify_thermal_state(
+    temperature_c,
+):
+    """
+    Convert a temperature reading into a deterministic
+    NEXUS system-health state.
+    """
+
+    if temperature_c is None:
+        return "UNKNOWN"
+
+    if temperature_c >= THERMAL_THRESHOLDS_C[
+        "critical"
+    ]:
+        return "CRITICAL"
+
+    if temperature_c >= THERMAL_THRESHOLDS_C[
+        "high"
+    ]:
+        return "HIGH"
+
+    if temperature_c >= THERMAL_THRESHOLDS_C[
+        "elevated"
+    ]:
+        return "ELEVATED"
+
+    return "NORMAL"
+
+
+def build_telemetry():
+    """
+    Build deterministic Jetson telemetry.
+    """
+
+    temperatures = read_thermal_zones()
+
+    cpu_temp = temperatures.get(
+        "cpu-thermal"
+    )
+
+    gpu_temp = temperatures.get(
+        "gpu-thermal"
+    )
+
+    tj_temp = temperatures.get(
+        "tj-thermal"
+    )
+
+    soc_temperatures = {
+        key: value
+        for key, value in temperatures.items()
+        if key.startswith("soc")
+    }
+
+    telemetry = {
+        "generated_at": (
+            datetime_now_iso()
+        ),
+        "temperature_c": {
+            "cpu": cpu_temp,
+            "gpu": gpu_temp,
+            "tj": tj_temp,
+            "soc": soc_temperatures,
+        },
+        "thermal_state": {
+            "cpu": classify_thermal_state(
+                cpu_temp
+            ),
+            "gpu": classify_thermal_state(
+                gpu_temp
+            ),
+            "tj": classify_thermal_state(
+                tj_temp
+            ),
+        },
+        "system": {
+            "cpu_percent": (
+                psutil.cpu_percent(
+                    interval=None
+                )
+            ),
+            "ram_percent": (
+                psutil.virtual_memory().percent
+            ),
+        },
+    }
+
+    return telemetry
+
+
+def datetime_now_iso():
+    return datetime.now(
+        timezone.utc
+    ).isoformat()
+
+
+def write_telemetry():
+    """
+    Persist current Jetson telemetry.
+    """
+
+    telemetry = build_telemetry()
+
+    TELEMETRY_FILE.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    TELEMETRY_FILE.write_text(
+        json.dumps(
+            telemetry,
+            indent=2,
+        )
+        + "\n"
+    )
+
+    return telemetry
 
 
 def load_state():
@@ -568,6 +751,14 @@ def main():
     try:
         while True:
             state = load_state()
+
+            try:
+                write_telemetry()
+            except Exception as error:
+                print(
+                    f"TELEMETRY: COLLECTION FAILED: {error}",
+                    flush=True,
+                )
 
             severity = highest_actionable_severity(
                 state

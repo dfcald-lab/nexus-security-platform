@@ -48,3 +48,10 @@ scripts/agent/switch_info_v1.py
 # NEXUS AI runtime logs
 monitoring/intelligence/*.log
 hardware/health.json
+
+# NEXUS backup copies
+*.backup.*
+*.backup
+
+# Local HTB session/runtime data
+operator/htb_sessions/*.json
