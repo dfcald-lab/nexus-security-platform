@@ -30,6 +30,20 @@ AI_TRIGGER_STATE = (
     / "ai_trigger_state.json"
 )
 
+AI_HISTORY = (
+    NEXUS
+    / "monitoring"
+    / "intelligence"
+    / "ai_history.jsonl"
+)
+AI_VALIDATION_STATE = (
+    NEXUS
+    / "monitoring"
+    / "intelligence"
+    / "ai_validation_state.json"
+)
+
+
 AI_COOLDOWN_SECONDS = 300
 
 OLLAMA_URL = (
@@ -344,15 +358,17 @@ Rules:
     evidence explicitly supports that conclusion.
 12. If a security cause is only possible, identify it as POSSIBLE
     and explain what additional evidence would be needed.
-13. When evidence_status is UNDETERMINED, do not name a specific
-    attack technique as the primary explanation. Describe the
-    observed behavior and state that the cause cannot yet be determined.
-14. When recommending additional investigation, prioritize collecting
-    corroborating evidence such as ARP, topology, device state, and
-    historical event patterns.
-15. Do not recommend investigating spoofing, unauthorized access,
-    compromise, or intrusion unless NEXUS evidence specifically
-    supports that hypothesis.
+13. When evidence_status is UNDETERMINED, describe only the observed
+    behavior in the interpretation and explicitly state that the cause
+    cannot yet be determined from the supplied evidence.
+14. When evidence_status is UNDETERMINED, recommended_action must focus
+    on neutral evidence collection, validation, monitoring, or checking
+    configuration/state. Do not recommend investigating a named attack,
+    spoofing, compromise, intrusion, malware, or unauthorized access.
+15. When evidence_status is UNDETERMINED, do not mention spoofing,
+    unauthorized access, compromise, intrusion, malware, or attack in
+    the recommended_action or reasoning_summary unless NEXUS explicitly
+    supplied evidence supporting that hypothesis.
 16. Do not execute commands.
 17. Do not directly modify the network.
 18. Recommended actions must be safe investigation, validation,
@@ -539,6 +555,140 @@ def validate_result(result):
 
     return result
 
+def append_ai_history(
+    result,
+    intelligence,
+    generated_at,
+):
+    AI_HISTORY.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    record = {
+        "generated_at": generated_at,
+        "source_intelligence_at": (
+            intelligence.get(
+                "generated_at"
+            )
+        ),
+        "source_last_event_at": (
+            intelligence.get(
+                "source_last_event_at"
+            )
+        ),
+        "model": MODEL,
+        "result": result,
+    }
+
+    with AI_HISTORY.open(
+        "a",
+        encoding="utf-8",
+    ) as file:
+
+        json.dump(
+            record,
+            file,
+            separators=(",", ":"),
+        )
+
+        file.write("\n")
+
+
+def validate_evidence_language(result):
+    """
+    Enforce NEXUS language rules after model generation.
+    """
+
+    if result.get("evidence_status") != "UNDETERMINED":
+        return result
+
+    blocked_terms = (
+        "spoofing",
+        "unauthorized access",
+        "compromise",
+        "intrusion",
+        "malware",
+        "attack",
+    )
+
+    fields_to_check = (
+        "recommended_action",
+        "reasoning_summary",
+    )
+
+    for field in fields_to_check:
+        text = str(
+            result.get(
+                field,
+                "",
+            )
+        ).lower()
+
+        for term in blocked_terms:
+            if term in text:
+                raise RuntimeError(
+                    "AI result violates UNDETERMINED "
+                    "evidence policy: "
+                    + field
+                    + " contains "
+                    + repr(term)
+                )
+
+    return result
+
+
+def record_ai_rejection(
+    error_message,
+    intelligence,
+):
+    """
+    Record a rejected AI attempt without publishing the result.
+    The previous valid AI result remains intact.
+    """
+
+    now = datetime.now(
+        timezone.utc
+    ).isoformat()
+
+    source_intelligence_at = intelligence.get(
+        "generated_at"
+    )
+
+    validation_state = {
+        "status": "REJECTED",
+        "attempted_at": now,
+        "source_intelligence_at": source_intelligence_at,
+        "error": str(error_message),
+    }
+
+    AI_VALIDATION_STATE.write_text(
+        json.dumps(
+            validation_state,
+            indent=2,
+        )
+        + "\n"
+    )
+
+    trigger_state = load_trigger_state()
+
+    trigger_state["last_run_at"] = now
+    trigger_state["last_attempt_at"] = now
+    trigger_state["last_attempt_status"] = "REJECTED"
+    trigger_state["last_attempt_error"] = str(
+        error_message
+    )
+    trigger_state["trigger_status"] = "PENDING"
+
+    AI_TRIGGER_STATE.write_text(
+        json.dumps(
+            trigger_state,
+            indent=2,
+        )
+        + "\n"
+    )
+
+
 def publish_result(
     result,
     intelligence,
@@ -582,6 +732,12 @@ def publish_result(
             indent=2,
         )
 
+    append_ai_history(
+        result,
+        intelligence,
+        output["generated_at"],
+    )
+
     return output
 
 def main():
@@ -622,6 +778,23 @@ def main():
     result = validate_result(
         result
     )
+
+    try:
+        result = validate_evidence_language(
+            result
+        )
+    except RuntimeError as exc:
+        record_ai_rejection(
+            str(exc),
+            ai_data,
+        )
+
+        print(
+            "NEXUS AI rejected:",
+            exc,
+        )
+
+        return
 
     output = publish_result(
         result,

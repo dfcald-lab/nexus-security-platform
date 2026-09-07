@@ -24,6 +24,14 @@ AI_TRIGGER_STATE = (
     / "ai_trigger_state.json"
 )
 
+AI_VALIDATION_STATE = (
+    Path.home()
+    / "nexus"
+    / "monitoring"
+    / "intelligence"
+    / "ai_validation_state.json"
+)
+
 HOST = "127.0.0.1"
 PORT = 8787
 
@@ -100,6 +108,27 @@ def load_ai_trigger_state():
         pass
 
     return default
+
+def load_ai_validation_state():
+    default = {
+        "status": "UNKNOWN",
+        "attempted_at": None,
+        "source_intelligence_at": None,
+        "error": None,
+    }
+
+    try:
+        with AI_VALIDATION_STATE.open() as file:
+            data = json.load(file)
+
+        if isinstance(data, dict):
+            default.update(data)
+
+    except (OSError, json.JSONDecodeError):
+        pass
+
+    return default
+
 
 def esc(value):
     return html.escape(str(value))
@@ -1687,6 +1716,7 @@ h1 {{
         state = load_state()
         ai_data = load_ai_result()
         ai_trigger_state = load_ai_trigger_state()
+        ai_validation_state = load_ai_validation_state()
 
 
         status = esc(
@@ -1711,26 +1741,72 @@ h1 {{
             "current_signature"
         )
 
-        if ai_status == "UNAVAILABLE":
-            ai_display_status = "UNAVAILABLE"
-        elif (
-            current_signature
-            and last_signature
-            and current_signature != last_signature
-        ):
-            ai_display_status = "PENDING"
-        elif (
-            current_signature
-            and last_signature
-            and current_signature == last_signature
-        ):
-            ai_display_status = "AVAILABLE"
-        else:
-            ai_display_status = "UNKNOWN"
+        validation_status = str(
+            ai_validation_state.get(
+                "status",
+                "UNKNOWN",
+            )
+        ).upper()
+
+        validation_attempted_at = ai_validation_state.get(
+            "attempted_at"
+        )
+
+        ai_generated_raw = ai_data.get(
+            "generated_at"
+        )
+
+        ai_display_status = None
+
+        if validation_status == "REJECTED":
+            try:
+                validation_time = datetime.fromisoformat(
+                    str(validation_attempted_at).replace(
+                        "Z",
+                        "+00:00",
+                    )
+                )
+                ai_time = datetime.fromisoformat(
+                    str(ai_generated_raw).replace(
+                        "Z",
+                        "+00:00",
+                    )
+                )
+
+                if validation_time > ai_time:
+                    ai_display_status = "REJECTED"
+            except (TypeError, ValueError):
+                ai_display_status = "REJECTED"
+
+        if ai_display_status is None:
+            if ai_status == "UNAVAILABLE":
+                ai_display_status = "UNAVAILABLE"
+            elif (
+                current_signature
+                and last_signature
+                and current_signature != last_signature
+            ):
+                ai_display_status = "PENDING"
+            elif (
+                current_signature
+                and last_signature
+                and current_signature == last_signature
+            ):
+                ai_display_status = "AVAILABLE"
+            else:
+                ai_display_status = "UNKNOWN"
 
         ai_status = esc(
             ai_display_status
         ).upper()
+
+        ai_status_class = (
+            "high"
+            if ai_display_status == "REJECTED"
+            else severity_class(
+                ai_confidence
+            )
+        )
 
         ai_model = esc(
             ai_data.get(
@@ -1800,6 +1876,35 @@ h1 {{
                 "No reasoning summary available.",
             )
         )
+
+        ai_validation_error = esc(
+            ai_validation_state.get(
+                "error",
+                "No validation error recorded.",
+            )
+        )
+
+        ai_validation_attempted = esc(
+            format_timestamp(
+                ai_validation_state.get(
+                    "attempted_at"
+                )
+            )
+        )
+
+        if ai_display_status == "REJECTED":
+            ai_panel_label = "LAST VALID AI RESULT"
+            ai_validation_note = (
+                '<div class="ai-rejection">'
+                '<div class="ai-label">LATEST AI ATTEMPT</div>'
+                '<div class="ai-value">REJECTED BY NEXUS VALIDATION</div>'
+                f'<div class="ai-meta">{ai_validation_error}</div>'
+                f'<div class="ai-meta">ATTEMPTED {ai_validation_attempted}</div>'
+                '</div>'
+            )
+        else:
+            ai_panel_label = "NEXUS AI"
+            ai_validation_note = ""
 
         risk = esc(
             state.get(
@@ -2086,6 +2191,15 @@ main {{
     border: 1px solid #26303a;
     border-radius: 10px;
 }}
+
+.ai-rejection {{
+    margin-top: 14px;
+    padding: 12px;
+    background: #160d0d;
+    border: 1px solid #4a2525;
+    border-radius: 10px;
+}}
+
 
 .ai-label {{
     color: #7f8a96;
@@ -2498,8 +2612,8 @@ main {{
 <section class="card section ai-card">
 
     <div class="ai-header">
-        <div class="label">NEXUS AI</div>
-        <div class="ai-status {severity_class(ai_confidence)}">
+        <div class="label">{ai_panel_label}</div>
+        <div class="ai-status {ai_status_class}">
             {ai_status}
         </div>
     </div>
@@ -2511,6 +2625,8 @@ main {{
         ·
         EVIDENCE {ai_evidence_status}
     </div>
+
+    {ai_validation_note}
 
     <div class="ai-text">
         {ai_interpretation}
