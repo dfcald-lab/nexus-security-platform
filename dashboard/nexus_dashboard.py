@@ -32,6 +32,13 @@ AI_VALIDATION_STATE = (
     / "ai_validation_state.json"
 )
 
+HARDWARE_HEALTH = (
+    Path.home()
+    / "nexus"
+    / "hardware"
+    / "health.json"
+)
+
 HOST = "127.0.0.1"
 PORT = 8787
 
@@ -119,6 +126,29 @@ def load_ai_validation_state():
 
     try:
         with AI_VALIDATION_STATE.open() as file:
+            data = json.load(file)
+
+        if isinstance(data, dict):
+            default.update(data)
+
+    except (OSError, json.JSONDecodeError):
+        pass
+
+    return default
+
+
+def load_hardware_health():
+    default = {
+        "overall": "UNKNOWN",
+        "oled": "UNKNOWN",
+        "led": "UNKNOWN",
+        "audio": "UNKNOWN",
+        "updated_at": None,
+        "error": None,
+    }
+
+    try:
+        with HARDWARE_HEALTH.open() as file:
             data = json.load(file)
 
         if isinstance(data, dict):
@@ -1717,6 +1747,7 @@ h1 {{
         ai_data = load_ai_result()
         ai_trigger_state = load_ai_trigger_state()
         ai_validation_state = load_ai_validation_state()
+        hardware_health = load_hardware_health()
 
 
         status = esc(
@@ -1799,6 +1830,26 @@ h1 {{
         ai_status = esc(
             ai_display_status
         ).upper()
+
+        # Load AI confidence before calculating the status class.
+        # ai_result is parsed again below for the remaining AI fields.
+        _early_ai_result = ai_data.get(
+            "result",
+            {},
+        )
+
+        if not isinstance(
+            _early_ai_result,
+            dict,
+        ):
+            _early_ai_result = {}
+
+        ai_confidence = esc(
+            _early_ai_result.get(
+                "confidence",
+                "UNKNOWN",
+            )
+        )
 
         ai_status_class = (
             "high"
@@ -1889,6 +1940,48 @@ h1 {{
                 ai_validation_state.get(
                     "attempted_at"
                 )
+            )
+        )
+
+        hardware_overall = esc(
+            hardware_health.get(
+                "overall",
+                "UNKNOWN",
+            )
+        ).upper()
+
+        hardware_oled = esc(
+            hardware_health.get(
+                "oled",
+                "UNKNOWN",
+            )
+        ).upper()
+
+        hardware_led = esc(
+            hardware_health.get(
+                "led",
+                "UNKNOWN",
+            )
+        ).upper()
+
+        hardware_audio = esc(
+            hardware_health.get(
+                "audio",
+                "UNKNOWN",
+            )
+        ).upper()
+
+        hardware_updated = esc(
+            format_timestamp(
+                hardware_health.get(
+                    "updated_at"
+                )
+            )
+        )
+
+        hardware_error = esc(
+            hardware_health.get(
+                "error"
             )
         )
 
@@ -2529,6 +2622,43 @@ main {{
         <div class="value">{network.get("topology_edges", 0)}</div>
     </article>
 
+</section>
+
+<section class="card section">
+    <h2>HARDWARE HEALTH</h2>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px;">
+        <div>
+            <div class="ai-label">OVERALL</div>
+            <div class="ai-value">{hardware_overall}</div>
+        </div>
+
+        <div>
+            <div class="ai-label">OLED</div>
+            <div class="ai-value">{hardware_oled}</div>
+        </div>
+
+        <div>
+            <div class="ai-label">LED</div>
+            <div class="ai-value">{hardware_led}</div>
+        </div>
+
+        <div>
+            <div class="ai-label">AUDIO</div>
+            <div class="ai-value">{hardware_audio}</div>
+        </div>
+    </div>
+
+    <div class="ai-meta">
+        LAST HARDWARE UPDATE {hardware_updated}
+    </div>
+
+    {(
+        f'<div class="ai-meta">HARDWARE ERROR: {hardware_error}</div>'
+        if hardware_error
+        and str(hardware_error).lower() not in {"none", "null", ""}
+        else ""
+    )}
 </section>
 
 <section class="card section network-card">

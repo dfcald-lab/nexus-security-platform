@@ -27,6 +27,14 @@ STATE_FILE = (
     / "state.json"
 )
 
+HEALTH_FILE = (
+    Path.home()
+    / "nexus"
+    / "hardware"
+    / "health.json"
+)
+
+
 SEVERITY_ORDER = {
     "INFO": 0,
     "MEDIUM": 1,
@@ -82,6 +90,115 @@ FONT_MED = ImageFont.truetype(
     "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
     12,
 )
+
+
+def write_hardware_health(
+    oled_status=None,
+    led_status=None,
+    audio_status=None,
+    error=None,
+):
+    health = {
+        "overall": "UNKNOWN",
+        "oled": "UNKNOWN",
+        "led": "UNKNOWN",
+        "audio": "UNKNOWN",
+        "updated_at": time.time(),
+        "error": None,
+    }
+
+    try:
+        if HEALTH_FILE.exists():
+            with HEALTH_FILE.open() as file:
+                existing = json.load(file)
+
+            if isinstance(existing, dict):
+                for key in (
+                    "overall",
+                    "oled",
+                    "led",
+                    "audio",
+                    "updated_at",
+                    "error",
+                ):
+                    if key in existing:
+                        health[key] = existing[key]
+
+    except (
+        OSError,
+        json.JSONDecodeError,
+    ):
+        pass
+
+    if oled_status is not None:
+        health["oled"] = str(oled_status).upper()
+
+    if led_status is not None:
+        health["led"] = str(led_status).upper()
+
+    if audio_status is not None:
+        health["audio"] = str(audio_status).upper()
+
+    if error is not None:
+        health["error"] = str(error)
+
+    elif oled_status == "ONLINE":
+        # A successful OLED operation clears a stale OLED error.
+        if (
+            isinstance(health.get("error"), str)
+            and (
+                health["error"].startswith("OLED:")
+                or health["error"].startswith("TEST: simulated OLED")
+            )
+        ):
+            health["error"] = None
+
+    elif led_status == "ONLINE":
+        # A successful LED operation clears a stale LED error.
+        if (
+            isinstance(health.get("error"), str)
+            and health["error"].startswith("LED:")
+        ):
+            health["error"] = None
+
+    elif audio_status == "ONLINE":
+        # Successful audio playback clears a stale audio error.
+        if (
+            isinstance(health.get("error"), str)
+            and health["error"].startswith("AUDIO:")
+        ):
+            health["error"] = None
+
+    statuses = (
+        health["oled"],
+        health["led"],
+        health["audio"],
+    )
+
+    if "DEGRADED" in statuses:
+        health["overall"] = "DEGRADED"
+    elif all(
+        status == "ONLINE"
+        for status in statuses
+    ):
+        health["overall"] = "HEALTHY"
+    else:
+        health["overall"] = "UNKNOWN"
+
+    health["updated_at"] = time.time()
+
+    HEALTH_FILE.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    HEALTH_FILE.write_text(
+        json.dumps(
+            health,
+            indent=2,
+        )
+        + "\n"
+    )
 
 
 def load_state():
@@ -154,6 +271,11 @@ def show_screen(lines):
 
     try:
         oled.display(image)
+
+        write_hardware_health(
+            oled_status="ONLINE",
+        )
+
     except (
         OSError,
         TimeoutError,
@@ -161,6 +283,11 @@ def show_screen(lines):
         print(
             f"OLED: DISPLAY FAILED: {error}",
             flush=True,
+        )
+
+        write_hardware_health(
+            oled_status="DEGRADED",
+            error=f"OLED: {error}",
         )
 
 
@@ -175,12 +302,31 @@ def set_led(severity, active_events):
         LED_COLORS["INFO"],
     )
 
-    cube.set_Single_Color(
-        255,
-        r,
-        g,
-        b,
-    )
+    try:
+        cube.set_Single_Color(
+            255,
+            r,
+            g,
+            b,
+        )
+
+        write_hardware_health(
+            led_status="ONLINE",
+        )
+
+    except (
+        OSError,
+        TimeoutError,
+    ) as error:
+        print(
+            f"LED: DISPLAY FAILED: {error}",
+            flush=True,
+        )
+
+        write_hardware_health(
+            led_status="DEGRADED",
+            error=f"LED: {error}",
+        )
 
     return state_name
 
@@ -345,8 +491,13 @@ def play_critical_alert():
             )
 
             if result.returncode != 0:
+                error_text = (
+                    f"AUDIO: PLAYBACK FAILED "
+                    f"({result.returncode})"
+                )
+
                 print(
-                    f"AUDIO: PLAYBACK FAILED ({result.returncode})",
+                    error_text,
                     flush=True,
                 )
 
@@ -356,7 +507,12 @@ def play_critical_alert():
                         flush=True,
                     )
 
-                return
+                write_hardware_health(
+                    audio_status="DEGRADED",
+                    error=error_text,
+                )
+
+                return False
 
             if count == 0:
                 time.sleep(0.7)
@@ -365,6 +521,12 @@ def play_critical_alert():
             "AUDIO: CRITICAL ALERT PLAYED x2",
             flush=True,
         )
+
+        write_hardware_health(
+            audio_status="ONLINE",
+        )
+
+        return True
 
     except (
         FileNotFoundError,
@@ -375,11 +537,28 @@ def play_critical_alert():
             flush=True,
         )
 
+        write_hardware_health(
+            audio_status="DEGRADED",
+            error=f"AUDIO: {error}",
+        )
+
+        return False
+
 
 def main():
     print(
         "NEXUS HARDWARE NODE ONLINE",
         flush=True,
+    )
+
+    # Start with honest hardware-health state.
+    # Components become ONLINE only after a successful operation.
+    # Audio remains UNKNOWN until a real alert is successfully played.
+    write_hardware_health(
+        oled_status="UNKNOWN",
+        led_status="UNKNOWN",
+        audio_status="UNKNOWN",
+        error=None,
     )
 
     last_state_key = None
