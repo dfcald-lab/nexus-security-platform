@@ -2,97 +2,162 @@
 
 ### Network EXploration, Unified eXposure & Security Intelligence
 
-> **A local-first cybersecurity observability and operator platform for network monitoring, evidence-driven intelligence, security validation, and authorized HTB research.**
+> **A local-first cybersecurity observability and operator platform that turns raw network and host observations into state, incidents, intelligence, validation plans, and actionable evidence.**
 
-NEXUS started as a network-monitoring project and has grown into a small security platform built around one core idea:
-
-**collect evidence deterministically, preserve state, correlate what happened, and use AI as an advisor—not as the source of truth.**
-
-It is designed to run on a Linux/Jetson-based lab environment, monitor network infrastructure, surface changes and incidents, correlate hardware telemetry, provide structured AI analysis, and give a human operator a separate workspace for authorized security research.
-
----
-
-## ⚡ What NEXUS Does
-
-| Layer | Purpose |
-|---|---|
-| 📡 **Network Collection** | Collects switch state, interfaces, VLANs, routes, MAC tables, ARP, CDP, spanning tree, and interface health data. |
-| 🧩 **Parsing & State** | Converts device output into structured records and tracks persistent device identity, state, and relationships. |
-| 🔎 **Change Detection** | Compares current and previous observations to identify network, topology, and device changes. |
-| 🚨 **Event Lifecycle** | Creates, classifies, correlates, tracks, and resolves events instead of treating every observation as a new incident. |
-| 🧠 **NEXUS Intelligence** | Groups related events into higher-level situations and produces deterministic risk/context summaries. |
-| 🤖 **Blue AI** | Uses a local LLM for structured advisory interpretation while deterministic monitoring remains authoritative. |
-| 🔴 **Red Team AI** | Generates bounded, non-destructive validation plans for observed situations. |
-| 🧪 **HTB Operator** | Provides a separate conversational workspace for authorized Hack The Box/lab research. |
-| 🛡️ **CVE Research** | Matches discovered software versions against NVD data and tracks exploit references from Exploit-DB. |
-| ✅ **Evidence Tracking** | Records condition-by-condition evidence as VERIFIED, CONTRADICTED, or UNKNOWN. |
-| 🌡️ **Hardware Telemetry** | Tracks Jetson CPU/GPU/TJ thermal state and system health. |
-| 💡 **Physical Alerting** | Integrates OLED, CUBE LEDs, and short critical audio alerts with NEXUS severity. |
-| 📊 **Web Dashboard** | Presents current state, incidents, intelligence, AI status, hardware health, network topology, and HTB research. |
-| 🧪 **Safe Simulation** | Provides controlled synthetic event generation for testing the event pipeline without touching production state. |
+[![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20Jetson-111827)](https://github.com/dfcald-lab/nexus-security-platform)
+[![Language](https://img.shields.io/badge/Language-Python%203-3776AB)](https://www.python.org/)
+[![AI](https://img.shields.io/badge/AI-Local%20Ollama-111827)](https://ollama.com/)
+[![Security](https://img.shields.io/badge/Security-Evidence--Driven-0F766E)](https://github.com/dfcald-lab/nexus-security-platform)
+[![Status](https://img.shields.io/badge/Status-Active%20Development-F59E0B)](https://github.com/dfcald-lab/nexus-security-platform/commits/main/)
 
 ---
 
-## 🧠 Design Philosophy
+## ⚡ What is NEXUS?
 
-NEXUS intentionally separates **facts, interpretation, and action**.
+NEXUS started as a network-monitoring project and evolved into a small security platform built around a simple rule:
+
+> **Deterministic systems establish what happened. AI helps interpret it. Evidence decides what is supported. Humans stay in control.**
+
+Instead of treating monitoring, AI, security validation, and lab research as separate projects, NEXUS connects them into one local-first workflow.
 
 ```text
-                    ┌─────────────────────┐
-                    │   Network / Host    │
-                    │      Evidence       │
-                    └──────────┬──────────┘
-                               │
-                               ▼
-                    ┌─────────────────────┐
-                    │ Deterministic       │
-                    │ Collection + Parsing │
-                    └──────────┬──────────┘
-                               │
-                               ▼
-                    ┌─────────────────────┐
-                    │ State + Diff +      │
-                    │ Event Lifecycle     │
-                    └──────────┬──────────┘
-                               │
-                               ▼
-                    ┌─────────────────────┐
-                    │ NEXUS Intelligence  │
-                    │ Correlation Layer   │
-                    └───────┬─────┬───────┘
-                            │     │
-                 ┌──────────┘     └──────────┐
-                 ▼                           ▼
-        ┌─────────────────┐        ┌─────────────────┐
-        │    Blue AI      │        │   Red Team AI   │
-        │ Advisory Only   │        │ Validation Plan │
-        └────────┬────────┘        └────────┬────────┘
-                 │                           │
-                 └────────────┬──────────────┘
-                              ▼
-                    ┌─────────────────────┐
-                    │ Human Operator      │
-                    │ + HTB Research     │
-                    └──────────┬──────────┘
-                               │
-                               ▼
-                    ┌─────────────────────┐
-                    │ Dashboard / OLED /  │
-                    │ LED / Audio         │
-                    └─────────────────────┘
+                           NEXUS
+                             │
+             ┌───────────────┴───────────────┐
+             │                               │
+        NETWORK / HOST                   OPERATOR LAB
+          OBSERVATIONS                  HTB / RESEARCH
+             │                               │
+             ▼                               ▼
+      COLLECTION + PARSING             SERVICE INVENTORY
+             │                               │
+             ▼                               ▼
+        STATE + DIFF                    CVE RESEARCH
+             │                               │
+             ▼                               ▼
+      EVENT LIFECYCLE                  EVIDENCE MODEL
+             │                               │
+             └───────────────┬───────────────┘
+                             ▼
+                    NEXUS INTELLIGENCE
+                      /             \
+                     /               \
+                    ▼                 ▼
+               BLUE AI           RED TEAM AI
+              ADVISORY          VALIDATION PLAN
+                    \                 /
+                     \               /
+                      └──────┬──────┘
+                             ▼
+                       HUMAN OPERATOR
+                             │
+                 ┌───────────┼───────────┐
+                 ▼           ▼           ▼
+             DASHBOARD     OLED        CUBE LED
+                                         + AUDIO
 ```
 
-### The most important rule
+---
 
-**AI does not create network truth.**
+## 🧠 The Core Design Decision
 
-The monitoring pipeline determines what was observed. AI receives that evidence and produces structured interpretation. Validation logic rejects unsupported conclusions. The human operator remains in control of security actions.
+NEXUS deliberately separates **observation**, **interpretation**, and **action**.
+
+### Deterministic monitoring is authoritative
+
+Switch output, parsed state, topology changes, device history, thermal telemetry, and event lifecycle logic are handled deterministically.
+
+### AI is advisory
+
+The Blue AI layer receives NEXUS evidence and produces structured interpretation. It does not create the underlying network truth.
+
+### Security validation is bounded
+
+The Red Team layer generates structured, non-destructive validation plans rather than autonomously attacking systems.
+
+### Evidence remains explicit
+
+Prerequisites can be tracked as:
+
+```text
+✓ VERIFIED
+✗ CONTRADICTED
+? UNKNOWN
+```
+
+That lets NEXUS distinguish:
+
+```text
+"This version is affected"
+
+from
+
+"The conditions required for this vulnerability are supported by evidence"
+
+from
+
+"The exploit was actually demonstrated"
+```
+
+Those are three different claims.
+
+---
+
+# 🔥 Feature Overview
+
+| Subsystem | What it does |
+|---|---|
+| 📡 Network Collection | Collects switch version, interfaces, VLANs, routes, MAC tables, ARP, CDP, spanning tree, and interface health data. |
+| 🧩 Parsing & State | Converts raw device output into structured state and persistent records. |
+| 🧭 Device Identity | Resolves recurring devices and tracks historical device/port relationships. |
+| 🔎 Change Detection | Detects changes in devices, ports, MAC relationships, network state, and topology. |
+| 🚨 Event Lifecycle | Creates, classifies, activates, correlates, and resolves events. |
+| 🧠 Intelligence | Correlates related events into higher-level situations with risk and context. |
+| 🤖 Blue AI | Local LLM advisory interpretation with structured output and evidence guardrails. |
+| 🔴 Red Team AI | Structured, bounded security validation planning. |
+| 🧪 Safe Simulator | Generates controlled synthetic events for pipeline testing. |
+| 🌡️ Thermal Telemetry | Tracks Jetson CPU/GPU/TJ thermal state and system metrics. |
+| 💡 Hardware Alerts | Maps severity to OLED, CUBE LEDs, and short critical audio alerts. |
+| 🧪 HTB Operator | Separate operator workspace for authorized labs and Hack The Box research. |
+| 🔍 CVE Research | Matches discovered versions against NVD data and records public exploit references. |
+| ✅ Evidence Tracking | Tracks vulnerability prerequisites condition-by-condition. |
+| 📊 Dashboard | Central browser interface for current state, intelligence, hardware, incidents, and HTB research. |
 
 ---
 
 # 🏗️ Architecture
 
-NEXUS is organized around several cooperating layers rather than one giant monitor script.
+A normal NEXUS monitoring cycle follows a deterministic pipeline:
+
+```text
+Switch collection
+       ↓
+Structured parsing
+       ↓
+Device identity resolution
+       ↓
+State comparison
+       ↓
+Topology construction
+       ↓
+Topology comparison
+       ↓
+Thermal / host telemetry
+       ↓
+Event classification + lifecycle
+       ↓
+Published Jetson state
+       ↓
+NEXUS intelligence correlation
+       ↓
+Blue AI / Red Team advisory processing
+       ↓
+Dashboard + physical alerting
+```
+
+The project is intentionally split into cooperating layers rather than one autonomous security agent.
+
+### Source tree
 
 ```text
 nexus/
@@ -111,13 +176,14 @@ nexus/
 ├── scripts/
 │   ├── nexus_monitor.py
 │   ├── monitor_switch.sh
-│   │
 │   ├── agent/
 │   │   ├── switch_info.py
 │   │   ├── switch_parser.py
 │   │   ├── device_identity.py
 │   │   ├── device_history.py
 │   │   ├── device_state.py
+│   │   ├── network_info.py
+│   │   ├── network_models.py
 │   │   ├── network_topology.py
 │   │   ├── topology_diff.py
 │   │   ├── switch_diff.py
@@ -145,41 +211,16 @@ nexus/
 
 ---
 
-# 📡 Network Monitoring Pipeline
+# 📡 Network Intelligence
 
-A normal monitoring cycle follows a deterministic sequence:
+NEXUS collects and reasons over structured switch observations instead of simply displaying command output.
 
-```text
-Switch collection
-      ↓
-Structured parsing
-      ↓
-Device identity resolution
-      ↓
-State comparison
-      ↓
-Topology construction
-      ↓
-Topology comparison
-      ↓
-Telemetry assessment
-      ↓
-Event lifecycle
-      ↓
-Jetson state publication
-      ↓
-NEXUS intelligence correlation
-      ↓
-Blue AI / Red Team advisory processing
-```
+The network collector gathers data including:
 
-The switch collector uses SSH automation through `pexpect` and gathers information such as:
-
-- IOS version and platform information
-- interface state
-- interface descriptions
+- Cisco IOS/platform information
+- interface state and descriptions
 - interface error counters
-- switchport configuration
+- switchport state
 - VLAN state
 - routing information
 - dynamic MAC addresses
@@ -187,15 +228,31 @@ The switch collector uses SSH automation through `pexpect` and gathers informati
 - CDP neighbors
 - spanning-tree state
 
-The collector is intentionally evidence-oriented: raw device output is transformed into structured state before higher-level reasoning occurs.
+The parser layer turns that output into machine-readable records. The state/diff layers then compare observations across cycles.
+
+This makes a change like:
+
+```text
+MAC appears on Fa4/0/1
+```
+
+more useful than a raw log line because NEXUS can ask:
+
+```text
+Was this device already known?
+Was the relationship changed?
+Has the device moved before?
+Is the event new or recurring?
+Does another observation explain it?
+```
 
 ---
 
-# 🧩 Device Identity & History
+# 🧭 Persistent Device Identity
 
-NEXUS does not treat a MAC address appearing on a different observation cycle as an entirely new device.
+NEXUS keeps historical device relationships so the same observed device can be tracked across monitoring cycles.
 
-The device layer maintains persistent identity and historical relationships so the system can distinguish changes such as:
+The system can distinguish concepts such as:
 
 ```text
 NEW DEVICE
@@ -206,15 +263,13 @@ MAC REMOVED
 PORT RELATIONSHIP CHANGED
 ```
 
-This historical context becomes important when intelligence evaluates recurring network behavior rather than isolated observations.
+That historical context feeds the intelligence layer rather than being discarded after each monitoring cycle.
 
 ---
 
 # 🚨 Event Lifecycle
 
-NEXUS uses an event lifecycle instead of simply appending alerts forever.
-
-Conceptually:
+NEXUS treats an event as a lifecycle, not an endless stream of duplicate alerts.
 
 ```text
 OBSERVED
@@ -231,30 +286,72 @@ CORRELATED      RECURRENT
 RESOLVED
 ```
 
-Events retain historical context while the current state focuses on actionable incidents.
+The same model is used for network conditions and supported hardware/thermal incidents.
 
-Thermal incidents use the same lifecycle model. A condition moving from `NORMAL → HIGH` can create an active thermal incident, while a matching `HIGH → NORMAL` recovery can resolve it.
+A thermal transition such as:
+
+```text
+NORMAL → HIGH
+```
+
+can create an active incident, while a matching recovery:
+
+```text
+HIGH → NORMAL
+```
+
+can resolve it.
+
+---
+
+# 🌡️ Hardware & Thermal Telemetry
+
+NEXUS can monitor Jetson thermal zones and system health alongside network observations.
+
+Tracked telemetry includes:
+
+- CPU temperature
+- GPU temperature
+- Jetson TJ temperature
+- available SoC thermal data
+- CPU utilization
+- RAM utilization
+
+Thermal state is classified deterministically:
+
+```text
+UNKNOWN
+NORMAL
+ELEVATED
+HIGH
+CRITICAL
+```
+
+Thermal incidents can then enter the same lifecycle and intelligence pipeline as network events.
 
 ---
 
 # 🧠 NEXUS Intelligence
 
-The intelligence layer converts individual events into higher-level situations.
+The intelligence layer converts multiple observations into higher-level situations.
 
-For example, multiple thermal events affecting the same Jetson sensor group can be represented as one logical situation rather than several independent incidents.
+A situation can contain:
 
-Likewise, network observations can be grouped into situations that provide:
+```text
+subject
+source event type
+number of events
+highest score
+risk
+confidence
+explanation
+investigation guidance
+supporting metrics
+```
 
-- subject
-- event count
-- highest observed score
-- risk level
-- confidence
-- explanation
-- investigation guidance
-- supporting metrics
+An important design choice is **correlation without double counting**.
 
-The important design choice is that correlation is **deterministic and inspectable**.
+For example, multiple sensors contributing to a single thermal incident can be grouped into one logical incident while retaining the individual contributing sensors as evidence.
 
 ---
 
@@ -262,9 +359,23 @@ The important design choice is that correlation is **deterministic and inspectab
 
 NEXUS includes a local AI advisory layer backed by Ollama.
 
-The AI client is deliberately constrained to a local Ollama endpoint and uses structured output. The model does not replace the monitoring engine.
+The AI pipeline is intentionally constrained:
 
-The AI contract distinguishes:
+```text
+NEXUS deterministic evidence
+          ↓
+structured prompt
+          ↓
+local LLM
+          ↓
+structured response
+          ↓
+validation
+          ↓
+advisory result
+```
+
+The response contract distinguishes:
 
 ```text
 OBSERVED
@@ -272,7 +383,7 @@ POSSIBLE
 UNDETERMINED
 ```
 
-and validates returned fields such as:
+and tracks fields such as:
 
 - interpretation
 - confidence
@@ -280,21 +391,19 @@ and validates returned fields such as:
 - reasoning summary
 - evidence status
 
-The validation layer can reject responses that introduce unsupported conclusions.
+Unsupported security conclusions can be rejected by validation rather than blindly displayed as truth.
 
-### Why this matters
+### Local-first AI
 
-A security monitoring system should not turn an ambiguous observation into a confident incident simply because an LLM produced a convincing sentence.
-
-NEXUS treats the LLM as **advisory intelligence over deterministic evidence**.
+The repository expects Ollama to remain local to the host. The AI layer is not intended to ship monitoring data to a remote inference service.
 
 ---
 
 # 🔴 Red Team AI
 
-The Red Team component is designed for defensive validation planning rather than autonomous exploitation.
+The Red Team component is a **validation planner**, not an autonomous attacker.
 
-It produces structured output such as:
+Its structured output includes:
 
 ```text
 Target
@@ -307,86 +416,126 @@ Expected evidence
 Safety note
 ```
 
-The validator blocks categories such as:
+The validator explicitly blocks categories including:
 
 - denial-of-service actions
 - credential theft
 - password spraying
 - persistence
 - backdoors
-- destructive payloads
-- exfiltration
+- destructive payload execution
+- data exfiltration
 - evasion
 - disabling logging
 
-The operator remains responsible for executing authorized validation steps.
+The intended workflow is:
+
+```text
+Observed situation
+       ↓
+Red Team hypothesis
+       ↓
+Safe validation plan
+       ↓
+Human operator review
+       ↓
+Authorized testing
+       ↓
+Evidence
+```
 
 ---
 
-# 🧪 HTB Operator Workspace
+# 🧪 Safe Simulation
 
-NEXUS also contains a separate operator workflow for **authorized labs and Hack The Box environments**.
+NEXUS includes a controlled simulator for testing the monitoring pipeline without relying on a live network change.
 
-The HTB subsystem can maintain:
+It can exercise the same kinds of downstream logic used by production monitoring:
+
+```text
+Synthetic event
+      ↓
+State / lifecycle processing
+      ↓
+Alert generation
+      ↓
+Intelligence correlation
+      ↓
+Published state
+```
+
+This provides a repeatable way to verify lifecycle and correlation behavior.
+
+---
+
+# 🧪 HTB Operator
+
+The HTB subsystem is intentionally separate from automatic monitoring.
+
+```text
+NEXUS Monitor
+    = automatic + deterministic
+
+Blue AI
+    = automatic + advisory
+
+Red Team AI
+    = automatic + bounded validation planning
+
+HTB Operator
+    = conversational + human-directed research
+```
+
+The operator workspace can maintain:
 
 - target information
 - discovered services
-- service versions
+- versions
 - findings
 - notes
-- evidence records
-- vulnerability research
-- Exploit-DB references
-- CVE condition assessments
+- evidence
+- CVE research
+- public exploit references
 
-Example session flow:
+### Service inventory
+
+Example workflow:
 
 ```text
 Nmap output
     ↓
 Service parser
     ↓
-Service/version inventory
+Service / version inventory
     ↓
-NVD research
-    ↓
-Version applicability
-    ↓
-Configuration conditions
-    ↓
-Evidence collection
-    ↓
-Exploitability state
+Research
 ```
 
-The system intentionally separates **version applicability** from **exploitability**.
-
-A matching CVE does not automatically mean the target is exploitable.
+The service parser keeps port, protocol, service, version, and raw evidence together so later research has a traceable source.
 
 ---
 
-# 🔎 CVE & Exploit Research
+# 🔎 CVE Research & Evidence
 
-The HTB research layer uses NVD CVE data and can correlate results with public Exploit-DB references.
+The research subsystem uses public NVD CVE data and records public Exploit-DB references.
 
-Research records retain information such as:
+Research records can contain:
 
 ```text
 CVE
+CVSS
 Version status
-Exploitability status
 Requirement
 Platform
 Conditions
 Evidence assessment
+Exploitability status
 Exploitability reasoning
-Description
-CVSS
 NVD reference
 Exploit-DB references
 ```
 
-This enables condition-aware results such as:
+### Example evidence-driven state
 
 ```text
 CVE-2025-24813
@@ -408,383 +557,284 @@ EXPLOIT REFERENCE
 EDB-52134
 ```
 
-That distinction is intentional: **the evidence layer can say what has been established without pretending that exploitation has already been demonstrated.**
-
----
-
-# ✅ Evidence Model
-
-Condition evidence uses three deterministic states:
+The distinction is deliberate:
 
 ```text
-✓ VERIFIED
-✗ CONTRADICTED
-? UNKNOWN
+VERSION MATCH
+    ≠
+EXPLOITABILITY
+    ≠
+SUCCESSFUL EXPLOITATION
 ```
 
-This gives the operator an explicit answer to:
-
-> “What do we actually know about this prerequisite?”
-
-rather than relying on a free-form AI explanation.
-
-Exploitability can then progress conservatively:
+The dashboard can also derive a conservative condition state:
 
 ```text
 UNCONFIRMED
-      ↓
 PARTIALLY VERIFIED
-      ↓
 CONDITIONS SATISFIED
-```
-
-A contradicted prerequisite produces:
-
-```text
 BLOCKED
 ```
 
-None of these states claim that an exploit succeeded.
+Those states represent prerequisite evidence. They do not claim that an exploit succeeded.
 
 ---
 
-# 🌡️ Jetson Hardware Telemetry
+# 📊 Dashboard
 
-NEXUS can monitor Jetson thermal state through Linux thermal-zone data and system metrics.
+The dashboard is the primary operator-facing interface and brings the platform layers together.
 
-Tracked telemetry includes:
-
-- CPU temperature
-- GPU temperature
-- Jetson TJ temperature
-- SoC temperature data where available
-- CPU utilization
-- RAM utilization
-
-Thermal conditions are classified deterministically into states such as:
+Current dashboard areas include:
 
 ```text
-UNKNOWN
-NORMAL
-ELEVATED
-HIGH
-CRITICAL
+CURRENT STATE
+├── system status
+├── risk / severity
+├── active events
+└── devices / topology
+
+INTELLIGENCE
+├── situations
+├── metrics
+├── Blue AI
+└── Red Team
+
+HARDWARE
+├── OLED / LED / audio health
+└── thermal telemetry
+
+HTB LAB
+├── services
+├── versions
+├── CVEs
+├── conditions
+├── evidence
+├── exploit references
+└── operator workspace
 ```
 
-Thermal state changes can enter the same event/intelligence pipeline as network events.
+The interface is designed for local browser access and mobile-friendly operation in the lab.
 
 ---
 
 # 💡 Physical Alerting
 
-The NEXUS hardware layer connects software severity to physical feedback.
+NEXUS connects software severity to physical feedback.
 
 ```text
-Severity
-   ↓
-OLED
-LED
-Audio
+                   NEXUS SEVERITY
+                         │
+              ┌──────────┼──────────┐
+              ▼          ▼          ▼
+            OLED        LED       AUDIO
+             │           │           │
+          details     persistent   short
+          / alerts    severity     critical
 ```
 
-The current hardware design uses:
+The hardware layer is designed so critical conditions can be visible on the Jetson itself while important alerts can also produce a short audible notification.
 
-- **OLED** for status and alert display
-- **CUBE LEDs** for severity visualization
-- **short audio notification** for important/critical conditions
-
-The audio path is intentionally not a constant alarm. It is used for significant events while the dashboard and physical LEDs remain available for persistent status.
-
----
-
-# 🧪 Safe Event Simulation
-
-NEXUS includes a simulator for controlled testing of event processing.
-
-The simulator is designed to exercise the event pipeline without modifying production monitoring state.
-
-This is useful for testing:
-
-- event creation
-- event classification
-- state transitions
-- resolution behavior
-- publisher output
-- alert generation
-- intelligence correlation
-
-Example concept:
-
-```text
-Synthetic event
-      ↓
-Normal NEXUS pipeline
-      ↓
-Observe resulting state
-      ↓
-Verify lifecycle behavior
-```
-
----
-
-# 🌐 Dashboard
-
-The web dashboard is the main operator-facing view.
-
-It brings together:
-
-```text
-┌──────────────────────────────────────┐
-│              NEXUS                  │
-├──────────────────────────────────────┤
-│ Current System State                 │
-│ Risk / Severity                     │
-│ Active Events                       │
-│ Device / Topology Information       │
-│ Intelligence                        │
-│ Blue AI status                      │
-│ Red Team status                     │
-│ Hardware health                     │
-├──────────────────────────────────────┤
-│ HTB LAB                             │
-│  Services                           │
-│  Versions                           │
-│  CVEs                               │
-│  Evidence                           │
-│  Exploit references                 │
-│  Operator workspace                 │
-└──────────────────────────────────────┘
-```
-
-The dashboard also exposes the HTB operator workflow so research can be performed from the same local NEXUS environment.
+The audio path is intentionally event-driven rather than a constant alarm.
 
 ---
 
 # 🔐 Security Model
 
-NEXUS is intentionally designed around a local-first security model.
+NEXUS is built as a local-first lab platform.
 
-### Local AI
+### Secrets stay outside source code
 
-The AI service is expected to run locally through Ollama rather than sending monitoring data to a remote hosted inference endpoint.
+Sensitive credentials are expected to come from environment configuration rather than hard-coded source values.
 
-### Environment-based secrets
+### AI stays local
 
-Sensitive values such as switch credentials are read from environment configuration rather than embedded directly into source code.
+The intended AI path uses local Ollama inference.
 
-### Evidence before interpretation
+### Evidence precedes interpretation
 
-Deterministic evidence comes first; AI interpretation comes after.
+Deterministic monitoring produces the evidence consumed by downstream intelligence.
 
-### Human in the loop
+### Human remains in the loop
 
-NEXUS does not autonomously perform destructive security actions.
+The operator decides what authorized security validation to execute.
 
-### Runtime data separation
+### Runtime data stays out of the public repository
 
-Network observations, state files, logs, HTB sessions, and other environment-specific runtime artifacts should remain outside the public source tree.
-
----
-
-# 🚀 Current Project Status
-
-NEXUS is an **active engineering project**.
-
-Current major capabilities include:
-
-- [x] Continuous network monitoring
-- [x] Structured switch parsing
-- [x] Persistent device identity
-- [x] Device/network history
-- [x] Topology construction
-- [x] Topology diffing
-- [x] Event classification
-- [x] Event lifecycle / resolution
-- [x] Network intelligence correlation
-- [x] Local Blue AI
-- [x] AI response validation
-- [x] AI freshness / trigger state
-- [x] Red Team planning layer
-- [x] Safe event simulation
-- [x] Jetson hardware health
-- [x] Thermal telemetry
-- [x] Thermal incident lifecycle
-- [x] OLED output
-- [x] CUBE LED output
-- [x] Critical audio alerting
-- [x] HTB service/version inventory
-- [x] NVD CVE research
-- [x] Exploit-DB references
-- [x] Condition-by-condition evidence
-- [x] Deterministic exploitability state
-- [x] Interactive HTB operator workflow
-- [x] Mobile-friendly dashboard
-
-### In progress / next engineering targets
-
-- Public deployment documentation
-- Portable systemd installation
-- Expanded automated tests
-- Dashboard modularization
-- Better service/version detection
-- Richer CVE condition matching
-- More hardware telemetry
-- Additional visualization and incident workflow
+Live monitoring state, credentials, HTB session data, logs, and hardware runtime files are environment-specific and should remain local.
 
 ---
 
-# 🛠️ Local Development
+# 🚀 Getting Started
 
-NEXUS is primarily developed and tested on Linux/Jetson hardware.
+NEXUS is an active engineering project and is currently optimized for a Linux/Jetson lab environment.
 
-The public repository intentionally excludes environment-specific runtime state and credentials.
+The public repository is intended to document the architecture and provide the implementation. Deployment is still being generalized for other environments.
 
-A typical local environment needs components such as:
+### Clone
 
-```text
-Python 3
-OpenSSH
-pexpect
-psutil
-Pillow
-luma.oled
-Ollama (optional for AI features)
-Jetson/CUBE hardware libraries (optional for hardware features)
+```bash
+git clone git@github.com:dfcald-lab/nexus-security-platform.git
+cd nexus-security-platform
 ```
 
-The exact deployment configuration is environment-specific and is intentionally kept separate from secrets and runtime state.
+### Python environment
 
----
+Use a Python 3 environment appropriate for your host and install the runtime packages required by the modules you enable.
 
-# 🧭 Example Operator Workflows
+The project currently includes components built around libraries such as:
 
-## Monitor the network
+- `pexpect`
+- `psutil`
+- `Pillow`
+- `luma.core`
+- `luma.oled`
 
-```text
-Switch
-  ↓
-NEXUS collection
-  ↓
-Diff
-  ↓
-Event lifecycle
-  ↓
-Intelligence
-  ↓
-Dashboard
-```
+Hardware-specific deployments additionally require the appropriate Yahboom CUBE driver stack.
 
-## Investigate a security situation
+### Local configuration
+
+Environment variables are used for deployment-specific values such as:
 
 ```text
-Observed event
-      ↓
-Evidence review
-      ↓
-NEXUS intelligence
-      ↓
-Blue AI advisory
-      ↓
-Red Team validation plan
-      ↓
-Human investigation
+NEXUS_SWITCH_PASSWORD
+NEXUS_JETSON_HOST
+NEXUS_CUBENANO_DRIVER
+NEXUS_TELEMETRY_FILE
+NEXUS_INTELLIGENCE_DIR
 ```
 
-## Research an HTB target
+Do not commit real credentials or live environment data.
+
+---
+
+# 🧪 Development & Validation
+
+NEXUS is developed iteratively with small, inspectable changes rather than one large generated code drop.
+
+Validation has included:
 
 ```text
-Nmap
-  ↓
-Service/version parser
-  ↓
-CVE research
-  ↓
-Conditions
-  ↓
-Evidence
-  ↓
-Exploitability assessment
-  ↓
-Operator decision
+Python syntax checks
+isolated event simulation
+thermal lifecycle simulation
+publisher lifecycle testing
+alert aggregation testing
+AI validation tests
+Red Team output validation
+HTB parser tests
+CVE research tests
+live dashboard checks
+hardware output checks
 ```
 
----
-
-# 📚 Engineering Lessons Demonstrated
-
-One of the goals of NEXUS is to demonstrate practical software engineering and security engineering concepts in one project.
-
-### State machines
-
-Network events, thermal events, alerts, and AI freshness all require explicit state handling.
-
-### Data modeling
-
-Raw CLI output is transformed into structured representations before being used by higher-level components.
-
-### Validation
-
-AI output is treated as untrusted input and validated before being accepted as an advisory result.
-
-### Persistence
-
-History matters. NEXUS stores state across monitoring cycles so behavior can be evaluated over time.
-
-### Fault tolerance
-
-Individual stages are designed so optional components do not unnecessarily destroy the core monitoring loop.
-
-### Security boundaries
-
-The operator, deterministic monitor, advisory AI, Red Team planner, and hardware outputs are intentionally separated.
-
-### Observability
-
-The system exposes not only conclusions, but also the evidence and lifecycle information behind those conclusions.
+The public repository intentionally preserves the development history so the implementation can be reviewed commit-by-commit.
 
 ---
 
-# 🏆 Why This Project Exists
+# 📈 Project Evolution
 
-NEXUS is being built as a practical bridge between:
+The public history shows the system growing in layers:
 
-**software engineering + networking + cybersecurity + Linux + embedded hardware + AI.**
+```text
+Continuous Monitoring
+        ↓
+State + Device Identity
+        ↓
+Event Classification
+        ↓
+Hardware Alerts
+        ↓
+Structured Intelligence
+        ↓
+Local AI
+        ↓
+AI Validation + Freshness
+        ↓
+Safe Simulation
+        ↓
+HTB Operator
+        ↓
+CVE Research
+        ↓
+Condition Evidence
+        ↓
+Deterministic Exploitability
+```
 
-Rather than building a demo that calls an LLM and displays its answer, the project focuses on the harder engineering problems around AI-assisted security systems:
-
-- What is actually observed?
-- What changed?
-- Is the change still active?
-- What evidence supports the conclusion?
-- What does the model know versus assume?
-- Can the model's output be validated?
-- Can an operator reproduce the reasoning?
-- Can the entire system be tested safely?
-
-That is the problem NEXUS is trying to solve.
+This is intentionally preserved in Git rather than squashed into one release commit.
 
 ---
 
-# 👨‍💻 Author
+# 🛣️ Roadmap
+
+The project is still evolving.
+
+Planned engineering areas include:
+
+- [ ] Portable systemd installation
+- [ ] More modular dashboard architecture
+- [ ] Expanded automated test suite
+- [ ] More hardware abstraction
+- [ ] Better deployment configuration templates
+- [ ] Additional network device support
+- [ ] Richer incident visualizations
+- [ ] More detailed HTB research workflows
+- [ ] Public-safe screenshots and demonstrations
+
+---
+
+# ⚠️ Scope & Safety
+
+NEXUS is intended for **authorized environments**, personal labs, owned infrastructure, and controlled training platforms such as Hack The Box.
+
+The HTB and Red Team components are designed around human-directed, bounded, non-destructive validation. Public vulnerability references are stored as research metadata; NEXUS does not automatically execute arbitrary public exploit code.
+
+Always obtain authorization before testing systems you do not own or administer.
+
+---
+
+# 👤 Author
 
 **Dorian Calderon**
 
-Cybersecurity-focused software engineering project.
+Cybersecurity-focused software engineering project centered on Linux, Python, network monitoring, security automation, local AI, and hands-on infrastructure.
 
-Built around hands-on Linux, networking, Python, embedded hardware, automation, defensive monitoring, and local AI experimentation.
-
----
-
-# ⚠️ Responsible Use
-
-NEXUS is intended for systems and environments you are authorized to monitor or test.
-
-The HTB/operator functionality is designed for authorized labs and controlled security research. Public vulnerability references are provided for research and validation workflows; users are responsible for applying appropriate authorization and safety boundaries.
+Built as an evolving lab platform rather than a static demo.
 
 ---
 
-## ⭐ Project Direction
+# 📜 License
 
-NEXUS is still evolving.
+License and redistribution terms are still being finalized for the public release.
 
-The long-term goal is a system where network evidence, device history, security intelligence, AI advisory analysis, authorized research tooling, and physical hardware feedback operate as one coherent local security platform—while keeping deterministic evidence and human oversight at the center.
+---
+
+## ⭐ Why NEXUS?
+
+Most monitoring demos stop at:
+
+```text
+Something changed.
+```
+
+NEXUS is trying to answer the harder questions:
+
+```text
+What changed?
+
+Is it actually new?
+
+Has it happened before?
+
+What evidence supports the conclusion?
+
+What conditions still need verification?
+
+What does the AI think—and can that interpretation be trusted?
+
+How should a human operator validate it safely?
+
+What should the system display locally?
+```
+
+That progression—from **raw observation → state → event → intelligence → evidence → human-directed action**—is the core idea behind NEXUS.
